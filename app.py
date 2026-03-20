@@ -331,50 +331,35 @@ def page_start():
 
     st.markdown("")
 
-    # --- 3 Step Cards ---
+    # --- 3 Step Cards (using pure Streamlit for clickability) ---
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        st.markdown("""
-        <div class="step-card">
-            <div class="step-number">1</div>
-            <div class="step-icon">📊</div>
-            <div class="step-title">Zelfinschatting</div>
-            <div class="step-desc">Schat per criterium in op welk niveau je eigen werk zit. Bekijk de niveaubeschrijvingen en kies eerlijk.</div>
-            <div class="step-output">📥 <strong>Wat je levert:</strong> Score per criterium + motivatie</div>
-        </div>
-        """, unsafe_allow_html=True)
-        if st.button("▶ Start Zelfinschatting", key="btn_zi", use_container_width=True):
-            st.session_state["nav"] = "📊 Zelfinschatting"
-            st.rerun()
+        with st.container(border=True):
+            st.markdown("#### :red[1] :bar_chart: Zelfinschatting")
+            st.markdown("Schat per criterium in op welk niveau je eigen werk zit. Bekijk de niveaubeschrijvingen en kies eerlijk.")
+            st.caption("**Wat je levert:** Score per criterium + motivatie")
+            if st.button("Start Zelfinschatting", key="btn_zi", use_container_width=True, type="primary"):
+                st.session_state["nav"] = "📊 Zelfinschatting"
+                st.rerun()
 
     with col2:
-        st.markdown("""
-        <div class="step-card">
-            <div class="step-number">2</div>
-            <div class="step-icon">🤖</div>
-            <div class="step-title">AI Feedbackcoach</div>
-            <div class="step-desc">Plak je tekst en ontvang feedback per criterium. De AI vertelt wat goed gaat en wat beter kan.</div>
-            <div class="step-output">📤 <strong>Wat je terugkrijgt:</strong> Niveau-inschatting + verbeterpunten</div>
-        </div>
-        """, unsafe_allow_html=True)
-        if st.button("▶ Start Feedbackcoach", key="btn_fb", use_container_width=True):
-            st.session_state["nav"] = "🤖 AI Feedbackcoach"
-            st.rerun()
+        with st.container(border=True):
+            st.markdown("#### :red[2] :robot_face: AI Feedbackcoach")
+            st.markdown("Plak je tekst en ontvang feedback per criterium. De AI vertelt wat goed gaat en wat beter kan.")
+            st.caption("**Wat je terugkrijgt:** Niveau-inschatting + verbeterpunten")
+            if st.button("Start Feedbackcoach", key="btn_fb", use_container_width=True, type="primary"):
+                st.session_state["nav"] = "🤖 AI Feedbackcoach"
+                st.rerun()
 
     with col3:
-        st.markdown("""
-        <div class="step-card">
-            <div class="step-number">3</div>
-            <div class="step-icon">🎙️</div>
-            <div class="step-title">CGI Oefencoach</div>
-            <div class="step-desc">Oefen je mondeling met een AI-beoordelaar die doorvraagt. Met voice of avatar.</div>
-            <div class="step-output">📤 <strong>Wat je terugkrijgt:</strong> Gesproken feedback + tips</div>
-        </div>
-        """, unsafe_allow_html=True)
-        if st.button("▶ Start CGI Coach", key="btn_cgi", use_container_width=True):
-            st.session_state["nav"] = "🎙️ CGI Oefencoach"
-            st.rerun()
+        with st.container(border=True):
+            st.markdown("#### :red[3] :studio_microphone: CGI Oefencoach")
+            st.markdown("Oefen je mondeling met een AI-beoordelaar die doorvraagt. Met voice of avatar.")
+            st.caption("**Wat je terugkrijgt:** Gesproken feedback + tips")
+            if st.button("Start CGI Coach", key="btn_cgi", use_container_width=True, type="primary"):
+                st.session_state["nav"] = "🎙️ CGI Oefencoach"
+                st.rerun()
 
     st.markdown("")
     st.markdown("---")
@@ -552,64 +537,57 @@ def page_feedbackcoach():
     st.markdown("")
 
     # Two options
-    tab_api, tab_manual = st.tabs(["⚡ Direct in de app (met API key)", "📋 Handmatig via Claude.ai (gratis)"])
+    tab_api, tab_manual = st.tabs(["Direct in de app (met API key)", "Handmatig via Claude.ai (gratis)"])
 
     with tab_api:
-        st.markdown("""
-        <div class="tool-card tool-card-blue">
-            <div class="tool-title">⚡ Directe AI-feedback in de app</div>
-            <div class="tool-subtitle">Plak je tekst, klik op de knop, en ontvang direct feedback hieronder.</div>
-        </div>
-        """, unsafe_allow_html=True)
+        with st.container(border=True):
+            st.markdown("**Directe AI-feedback in de app**")
+            st.markdown("Plak je tekst, klik op de knop, en ontvang direct feedback hieronder.")
 
-        api_key = st.text_input("🔑 Anthropic API Key", type="password", key="api_key",
-                                help="Vraag je docent om de API key, of maak een gratis account op console.anthropic.com")
+        with st.form("feedback_form"):
+            api_key = st.text_input("Anthropic API Key", type="password",
+                                    help="Vraag je docent om de API key, of maak een gratis account op console.anthropic.com")
 
-        onderdeel = st.selectbox("📄 Welk onderdeel wil je laten checken?", [
-            "7S-analyse", "DESTEP", "Porter 5 krachten", "SWOT",
-            "Confrontatiematrix", "Strategisch advies", "Volledig rapport",
-        ])
+            onderdeel = st.selectbox("Welk onderdeel wil je laten checken?", [
+                "7S-analyse", "DESTEP", "Porter 5 krachten", "SWOT",
+                "Confrontatiematrix", "Strategisch advies", "Volledig rapport",
+            ])
 
-        student_text = st.text_area(
-            "📝 Plak hier je tekst",
-            height=300,
-            placeholder="Kopieer het onderdeel uit je rapport en plak het hier. Minimaal 50 tekens.",
-        )
+            student_text = st.text_area(
+                "Plak hier je tekst",
+                height=300,
+                placeholder="Kopieer het onderdeel uit je rapport en plak het hier. Minimaal 50 tekens.",
+            )
 
-        if st.button("🚀 Vraag feedback", type="primary", use_container_width=True):
+            submitted = st.form_submit_button("Vraag feedback", type="primary", use_container_width=True)
+
+        if submitted:
             if not api_key:
-                st.error("⚠️ Vul je API key in.")
-                return
-            if not student_text or len(student_text) < 50:
-                st.error("⚠️ Plak een tekst van minimaal 50 tekens.")
-                return
+                st.error("Vul je API key in.")
+            elif not student_text or len(student_text) < 50:
+                st.error("Plak een tekst van minimaal 50 tekens.")
+            else:
+                try:
+                    import anthropic
+                    client = anthropic.Anthropic(api_key=api_key)
 
-            try:
-                import anthropic
-                client = anthropic.Anthropic(api_key=api_key)
+                    with st.spinner("AI analyseert je werk op basis van de rubriccriteria..."):
+                        message = client.messages.create(
+                            model="claude-sonnet-4-20250514",
+                            max_tokens=4000,
+                            messages=[{
+                                "role": "user",
+                                "content": f"{FEEDBACK_PROMPT}\n\nDe student levert het volgende onderdeel in: {onderdeel}\n\nHier is de tekst van de student:\n\n{student_text}",
+                            }],
+                        )
 
-                with st.spinner("🔍 AI analyseert je werk op basis van de rubriccriteria..."):
-                    message = client.messages.create(
-                        model="claude-sonnet-4-20250514",
-                        max_tokens=4000,
-                        messages=[{
-                            "role": "user",
-                            "content": f"{FEEDBACK_PROMPT}\n\nDe student levert het volgende onderdeel in: {onderdeel}\n\nHier is de tekst van de student:\n\n{student_text}",
-                        }],
-                    )
+                    st.markdown("---")
+                    st.markdown("### Feedback van de AI Feedbackcoach")
+                    st.markdown(message.content[0].text)
+                    st.info("Dit is formatieve feedback, geen beoordeling. De docent geeft het definitieve cijfer. Ga nu terug naar de Zelfinschatting om je reflectie in te vullen.")
 
-                st.markdown("---")
-                st.markdown("### 📋 Feedback van de AI Feedbackcoach")
-                st.markdown(message.content[0].text)
-                st.markdown("""
-                <div class="info-box-orange" style="margin-top: 1rem;">
-                    <strong>📌 Dit is formatieve feedback, geen beoordeling.</strong> De docent geeft het definitieve cijfer.
-                    Ga nu terug naar de Zelfinschatting om je reflectie in te vullen.
-                </div>
-                """, unsafe_allow_html=True)
-
-            except Exception as e:
-                st.error(f"❌ Er ging iets mis: {e}")
+                except Exception as e:
+                    st.error(f"Er ging iets mis: {e}")
 
     with tab_manual:
         st.markdown("""
