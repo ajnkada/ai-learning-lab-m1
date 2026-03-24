@@ -82,21 +82,52 @@ PATTERNS = {
     "Datum": r'\b\d{1,2}[\-/\.]\d{1,2}[\-/\.]\d{2,4}\b',
 }
 
-# Placeholder labels for each category
-PLACEHOLDER_MAP = {
-    "E-mailadres": "[E-MAIL]",
-    "Telefoonnummer": "[TELEFOON]",
-    "BSN (Burgerservicenummer)": "[BSN]",
-    "IBAN": "[IBAN]",
-    "Postcode (NL)": "[POSTCODE]",
-    "KvK-nummer": "[KVK]",
-    "Studentnummer": "[STUDENTNR]",
-    "Datum": "[DATUM]",
-    "Persoonsnaam": "[NAAM]",
-    "Bedrijfsnaam": "[BEDRIJF]",
-    "Adres": "[ADRES]",
-    "Locatie": "[LOCATIE]",
+# Base placeholder labels for each category (used to generate indexed placeholders)
+PLACEHOLDER_BASE = {
+    "E-mailadres": "E-MAIL",
+    "Telefoonnummer": "TELEFOON",
+    "BSN (Burgerservicenummer)": "BSN",
+    "IBAN": "IBAN",
+    "Postcode (NL)": "POSTCODE",
+    "KvK-nummer": "KVK",
+    "Studentnummer": "STUDENTNR",
+    "Datum": "DATUM",
+    "Persoonsnaam": "NAAM",
+    "Bedrijfsnaam": "BEDRIJF",
+    "Adres": "ADRES",
+    "Locatie": "LOCATIE",
+    "Handmatig": "VERBORGEN",
 }
+
+# Legacy PLACEHOLDER_MAP kept for display/export compatibility
+PLACEHOLDER_MAP = {cat: f"[{base}]" for cat, base in PLACEHOLDER_BASE.items()}
+
+
+def _index_label(index: int) -> str:
+    """Return A-Z for 0-25, then 1, 2, 3... for 26+."""
+    if index < 26:
+        return chr(ord('A') + index)
+    return str(index - 25)
+
+
+def build_placeholder_mapping(entities_to_replace: dict) -> dict:
+    """Build a mapping from each unique entity value to a consistent indexed placeholder.
+
+    Returns dict: {original_value: (placeholder_string, category)}
+    When a category has only one unique value, no index suffix is added.
+    """
+    mapping = {}
+    for category, values in entities_to_replace.items():
+        base = PLACEHOLDER_BASE.get(category, category.upper())
+        sorted_values = sorted(values, key=lambda v: v.lower())
+        if len(sorted_values) == 1:
+            # Single value: no suffix needed
+            mapping[sorted_values[0]] = (f"[{base}]", category)
+        else:
+            for i, value in enumerate(sorted_values):
+                label = _index_label(i)
+                mapping[value] = (f"[{base}_{label}]", category)
+    return mapping
 
 
 def extract_text_from_pdf(file_bytes: bytes) -> str:
@@ -195,20 +226,21 @@ def detect_entities_regex(text: str, selected_categories: list) -> dict:
 
 
 def anonymize_text(text: str, entities_to_replace: dict) -> tuple:
-    """Replace all detected entities with placeholders. Returns (anonymized_text, count)."""
+    """Replace all detected entities with consistent indexed placeholders.
+
+    Returns (anonymized_text, replacement_count, placeholder_mapping).
+    The placeholder_mapping maps original values to their assigned placeholders.
+    """
     anonymized = text
     total_replacements = 0
 
-    # Sort entities by length (longest first) to avoid partial replacements
-    all_replacements = []
-    for category, values in entities_to_replace.items():
-        placeholder = PLACEHOLDER_MAP.get(category, f"[{category.upper()}]")
-        for value in values:
-            all_replacements.append((value, placeholder, category))
+    # Build consistent placeholder mapping
+    mapping = build_placeholder_mapping(entities_to_replace)
 
-    all_replacements.sort(key=lambda x: len(x[0]), reverse=True)
+    # Sort by length (longest first) to avoid partial replacements
+    sorted_items = sorted(mapping.items(), key=lambda x: len(x[0]), reverse=True)
 
-    for value, placeholder, category in all_replacements:
+    for value, (placeholder, category) in sorted_items:
         escaped = re.escape(value)
         pattern = re.compile(escaped, re.IGNORECASE)
         count = len(pattern.findall(anonymized))
@@ -216,7 +248,7 @@ def anonymize_text(text: str, entities_to_replace: dict) -> tuple:
             anonymized = pattern.sub(placeholder, anonymized)
             total_replacements += count
 
-    return anonymized, total_replacements
+    return anonymized, total_replacements, mapping
 
 
 def create_pdf(text: str) -> bytes:
@@ -266,14 +298,17 @@ def create_pdf(text: str) -> bytes:
             .replace('<', '&lt;')
             .replace('>', '&gt;')
         )
-        # Highlight anonymized placeholders in red
-        for placeholder in PLACEHOLDER_MAP.values():
-            escaped_ph = placeholder.replace('[', '&lt;').replace(']', '&gt;')
-            safe_line_escaped = placeholder.replace('[', '&lt;').replace(']', '&gt;')
-            safe_line = safe_line.replace(
-                placeholder,
-                f'<font color="#c00000"><b>{safe_line_escaped}</b></font>'
-            )
+        # Highlight anonymized placeholders in red (match [LABEL] and [LABEL_X])
+        _ph_re = re.compile(r'\[([A-Z][A-Z\-]*(?:_[A-Z0-9]+)?)\]')
+        parts = _ph_re.split(safe_line)
+        if len(parts) > 1:
+            rebuilt = ""
+            for idx, part in enumerate(parts):
+                if idx % 2 == 0:
+                    rebuilt += part
+                else:
+                    rebuilt += f'<font color="#c00000"><b>[{part}]</b></font>'
+            safe_line = rebuilt
         if safe_line.strip():
             story.append(Paragraph(safe_line, normal_style))
         else:
@@ -296,12 +331,8 @@ def create_docx(text: str) -> bytes:
     for run in title.runs:
         run.font.color.rgb = RGBColor(0xC0, 0x00, 0x00)
 
-    # Process text
-    placeholder_pattern = re.compile(
-        r'(\[(?:' + '|'.join(
-            re.escape(p.strip('[]')) for p in PLACEHOLDER_MAP.values()
-        ) + r')\])'
-    )
+    # Process text — match any [LABEL] or [LABEL_X] placeholder
+    placeholder_pattern = re.compile(r'(\[[A-Z][A-Z\-]*(?:_[A-Z0-9]+)?\])')
 
     for line in text.split('\n'):
         if not line.strip():
@@ -497,9 +528,18 @@ if uploaded_file is not None:
         entities_to_replace = {}
 
         for category, values in all_entities.items():
-            placeholder = PLACEHOLDER_MAP.get(category, f"[{category.upper()}]")
+            base = PLACEHOLDER_BASE.get(category, category.upper())
+            if len(values) == 1:
+                preview = f"`[{base}]`"
+            else:
+                preview = ", ".join(
+                    f"`[{base}_{_index_label(i)}]`"
+                    for i in range(min(len(values), 3))
+                )
+                if len(values) > 3:
+                    preview += ", ..."
             with st.expander(
-                f"{category} — {len(values)} gevonden → wordt vervangen door `{placeholder}`"
+                f"{category} — {len(values)} gevonden → {preview}"
             ):
                 items_list = sorted(values)
                 selected_items = st.multiselect(
@@ -525,8 +565,6 @@ if uploaded_file is not None:
             }
             if custom_list:
                 entities_to_replace["Handmatig"] = custom_list
-                if "Handmatig" not in PLACEHOLDER_MAP:
-                    PLACEHOLDER_MAP["Handmatig"] = "[VERBORGEN]"
 
         # Anonymize button
         st.markdown("")
@@ -535,7 +573,7 @@ if uploaded_file is not None:
                 st.warning("Geen items geselecteerd om te anonimiseren.")
             else:
                 with st.spinner("🔒 Bezig met anonimiseren..."):
-                    anonymized_text, replacement_count = anonymize_text(
+                    anonymized_text, replacement_count, ph_mapping = anonymize_text(
                         original_text, entities_to_replace
                     )
 
@@ -549,6 +587,7 @@ if uploaded_file is not None:
                 # Store in session state
                 st.session_state["anonymized_text"] = anonymized_text
                 st.session_state["replacement_count"] = replacement_count
+                st.session_state["placeholder_mapping"] = ph_mapping
 
         # Show results if available
         if "anonymized_text" in st.session_state:
@@ -566,6 +605,19 @@ if uploaded_file is not None:
                     disabled=True,
                     label_visibility="collapsed",
                 )
+
+            # Show placeholder legend
+            if "placeholder_mapping" in st.session_state and st.session_state["placeholder_mapping"]:
+                with st.expander("🔑 Placeholder-legenda", expanded=False):
+                    ph_map = st.session_state["placeholder_mapping"]
+                    # Group by category
+                    by_cat = {}
+                    for orig, (ph, cat) in ph_map.items():
+                        by_cat.setdefault(cat, []).append((orig, ph))
+                    for cat, items in sorted(by_cat.items()):
+                        st.markdown(f"**{cat}:**")
+                        for orig, ph in sorted(items, key=lambda x: x[1]):
+                            st.markdown(f"- `{ph}` ← {orig}")
 
             # Download buttons
             st.markdown("### 💾 Downloaden")
