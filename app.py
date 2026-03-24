@@ -79,7 +79,7 @@ PATTERNS = {
     "Postcode (NL)": r'\b\d{4}\s?[A-Z]{2}\b',
     "KvK-nummer": r'\b\d{8}\b',
     "Studentnummer": r'\b[sS]?\d{6,8}\b',
-    "Datum": r'\b\d{1,2}[\-/\.]\d{1,2}[\-/\.]\d{2,4}\b',
+    "Datum": r'\b(?:0?[1-9]|[12]\d|3[01])[\-/](?:0?[1-9]|1[0-2])[\-/](?:19|20)\d{2}\b',
 }
 
 # Base placeholder labels for each category (used to generate indexed placeholders)
@@ -184,46 +184,96 @@ def load_spacy_model():
 _DUTCH_FALSE_POSITIVES = {
     # Document structure / section labels
     "adres", "advies", "adviesrapport", "analyse", "aanname", "actie",
-    "bijlage", "brainstormen", "berekening", "borgplan", "checklist",
-    "conclusie", "contact", "controle", "control", "cyclus", "data",
-    "datum", "define", "doellijn", "does", "e-mailadres", "figuur",
-    "groep", "handelingen", "hiervoor", "hoofd", "huidig",
-    "implementatie", "improve", "inhoudsopgave", "inleiding",
-    "interne", "intern", "inwendig", "keuzematrix", "kilogram",
-    "klantvraag", "korte", "kwaliteitsverlies", "lijn", "levering",
-    "locatie", "machineverlies", "machinestilstand", "management",
-    "materiaal", "maximale", "measure", "meetplan", "methode",
+    "afbakeningen", "afkeur", "bijlage", "bijlag", "brainstormen",
+    "berekening", "borgplan", "borgingspiramide", "borgingsfase",
+    "checklist", "conclusie", "contact", "contactgegevens", "controle",
+    "control", "cyclus", "data", "datum", "define", "doellijn", "does",
+    "e-mailadres", "figuur", "groep", "handelingen", "hiervoor",
+    "hieraan", "hoofd", "hoofdstuk", "huidig", "implementatie",
+    "improve", "inhoudsopgave", "inleiding", "interne", "intern",
+    "inwendig", "keuzematrix", "keuzetabel", "kilogram", "klantvraag",
+    "korte", "kwaliteitsverlies", "lijn", "levering", "locatie",
+    "machineverlies", "machinestilstand", "management", "materiaal",
+    "maximale", "measure", "meetplan", "methode", "methodologie",
     "mobiliseren", "naam", "nauwkeuriger", "november", "omstellen",
     "omstelmoment", "onderzoeksmodel", "onderzoeksmethode",
-    "opgehaald", "optimaliseren", "opstart", "output", "pauze",
-    "plan", "postcode", "productcode", "productgroep", "project",
-    "planningsgroep", "prestatiegraad", "productiemanager",
-    "productiemedewerkers", "reflecteren", "rekengegevens",
-    "representatief", "resultaat", "samenvatting", "single",
-    "standaard", "stilstand", "stilstandsverlies", "stap",
-    "stakeholders", "telefoonnummer", "tonnage", "transport",
-    "uitvoering", "uitvoeringsgegevens", "validiteit", "voorzichtig",
-    "voorman", "vraag", "wachttijd", "waarderen", "welke",
-    "werkelijke", "zakken", "zakwissel",
+    "opgehaald", "optimaliseren", "opstart", "orderverloop", "output",
+    "pauze", "plan", "postcode", "postadres", "productcode",
+    "productgroep", "project", "planningsgroep", "prestatiegraad",
+    "productiemanager", "productiemedewerkers", "probleemstelling",
+    "reflecteren", "rekengegevens", "representatief", "resumerend",
+    "resultaat", "samenvatting", "single", "snipsel", "standaard",
+    "stilstand", "stilstandsverlies", "stap", "stakeholders",
+    "telefoonnummer", "tonnage", "totaal", "transport", "uitvoering",
+    "uitvoeringsgegevens", "validiteit", "voorzichtig", "voorman",
+    "vraag", "wachttijd", "waarderen", "welke", "werkelijke",
+    "werkinstructie", "wijzigingen", "zakken", "zakwissel",
     # Generic adjectives/adverbs/nouns often misclassified
-    "actuele", "act", "afkeur", "afzakmachine", "andon",
-    "bedrijfskunde", "bewust", "blokkade", "cement", "check", "cold",
-    "counting", "cuglaton", "daarentegen", "documenteren", "echter",
-    "education", "effectiveness", "effectiever", "equipment",
-    "etiketteerapparaat", "extern", "gemiddeld", "gemiddelde",
-    "gepland", "extreme", "hoogst", "haalbare", "limited", "machine",
-    "mankementen", "mapping", "montagemortels", "observations",
-    "obseveren", "operations", "overal", "process", "professional",
-    "kwantitatief", "staalvezelmortels", "uren",
+    "actuele", "act", "afzakmachine", "allianties", "andon",
+    "auteur", "bedrijfskunde", "betrouwbare", "bewust", "blokkade",
+    "cement", "check", "cold", "competencies", "continuous", "counting",
+    "cuglaton", "daarentegen", "documenteren", "echter", "education",
+    "effectiveness", "effectiever", "english", "equipment",
+    "etiketteerapparaat", "extern", "fase", "finance",
+    "gekenmerkt", "gemiddeld", "gemiddelde", "gepland", "extreme",
+    "haalbare", "historie", "hoogst", "impact", "inkoop",
+    "interviews", "kijkend", "limited", "leidinggevende",
+    "machine", "mankementen", "mapping", "modificatie",
+    "montagemortels", "motivatie", "observations", "obseveren",
+    "ook", "operations", "optimaal", "overal", "process",
+    "professional", "kwantitatief", "staalvezelmortels",
+    "techniek", "technische", "uren", "vaardigheden",
+    # Lean Six Sigma / quality management terms
+    "current state", "future state", "green belt", "black belt",
+    "yellow belt", "lean", "sigma", "sixsigma", "kaizen", "kanban",
+    "gemba", "muda", "mura", "muri", "poka-yoke", "ishikawa",
+    "kraljic", "value stream", "vsm", "raci", "businesscase",
+    "mindset", "simulation",
     # Month names
     "januari", "februari", "maart", "april", "mei", "juni", "juli",
     "augustus", "september", "oktober", "november", "december",
     # Common technical/business abbreviations (not company names)
     "oee", "dmaic", "smed", "pdca", "imwr", "ict", "tms", "osm",
-    "kvk", "bsn", "iban", "tht", "bvnd",
+    "kvk", "bsn", "iban", "tht", "bvnd", "r&d",
+    # Common English words appearing in Dutch technical documents
+    "breakdown", "cafe", "cold", "continuous", "crown", "flow",
+    "global", "hire", "hour", "imaginary", "impact", "limited",
+    "material", "meterial", "mindset", "more", "mountain", "open",
+    "parcel", "positive", "production", "quick", "quick wins",
+    "rich", "school", "services", "simulation", "sons",
+    # Academic / reference terms (not person names or locations)
+    "academy", "publishing", "regio", "holdings", "holding",
     # Document field labels / compound technical terms
     "capaciteitsoverschot", "capaciteitsbenutting",
     "arbeidscapaciteit",
+}
+
+# Known Dutch cities / real locations for positive matching
+_KNOWN_DUTCH_LOCATIONS = {
+    # Major cities
+    "amsterdam", "rotterdam", "den haag", "'s-gravenhage", "utrecht",
+    "eindhoven", "tilburg", "groningen", "almere", "breda", "nijmegen",
+    "enschede", "apeldoorn", "haarlem", "arnhem", "amersfoort",
+    "zaanstad", "haarlemmermeer", "den bosch", "'s-hertogenbosch",
+    "zoetermeer", "zwolle", "maastricht", "leiden", "dordrecht",
+    "ede", "emmen", "westland", "delft", "deventer", "leeuwarden",
+    "alkmaar", "helmond", "hilversum", "heerlen", "oss", "roosendaal",
+    "purmerend", "schiedam", "spijkenisse", "vlaardingen", "almelo",
+    "gouda", "veenendaal", "assen", "lelystad", "middelburg",
+    "hoogeveen", "vlissingen", "wageningen", "doetinchem",
+    "hardenberg", "barneveld", "zeist", "weert", "venlo", "venray",
+    "roermond", "sittard", "geleen", "kerkrade", "heerenveen",
+    "sneek", "drachten", "kampen", "harderwijk", "uden", "veghel",
+    "waalwijk", "boxtel", "best", "oisterwijk", "dongen", "budel",
+    # Provinces
+    "noord-holland", "zuid-holland", "noord-brabant", "gelderland",
+    "overijssel", "flevoland", "friesland", "drenthe", "limburg",
+    "zeeland", "groningen",
+    # Countries / regions
+    "nederland", "belgie", "belgië", "duitsland", "europa", "afrika",
+    "azie", "azië",
+    # Common location words
+    "straat", "laan", "weg", "plein", "gracht", "kade",
 }
 
 # Patterns that indicate a false positive NER entity
@@ -234,32 +284,52 @@ _FP_PERCENTAGE = re.compile(r'^\d+[,.]?\d*\s*%$')          # "56%", "73%"
 _FP_NUMBER_HEAVY = re.compile(r'^\d')                       # starts with digit
 _FP_MATH_UNICODE = re.compile(r'[\U0001D400-\U0001D7FF]')  # math italic/bold chars
 _FP_FRAGMENT = re.compile(r'^.{0,3}[\-/=]$|^[\-/=]')       # "in-", "THT-", "𝑢𝑢𝑟="
-_FP_ALL_CAPS_SHORT = re.compile(r'^[A-Z]{2,6}$')            # "ICT", "DMAIC", acronyms
-_FP_ALPHANUMERIC_CODE = re.compile(r'^[A-Z0-9]{2,}$')      # "MP2BOI", "R3", "CAPACITEITSBENUTTING"
+_FP_ALL_CAPS_SHORT = re.compile(r'^[A-Z]{2,8}$')            # "ICT", "DMAIC", "LOIJENGA"
+_FP_ALPHANUMERIC_CODE = re.compile(r'^[A-Z0-9]{2,}$')      # "MP2BOI", "R3"
 _FP_UNIT = re.compile(r'[/²³]|mm\d|m\d|cm\d')              # units: "N/mm2"
 _FP_ROMAN_NUMERAL = re.compile(r'\b[IVXLCDM]{1,4}\b')      # "VII", "III"
+_FP_BULLET_PREFIX = re.compile(r'^[•\-\*○◦▪►▸‣⁃]\s*')      # "• Hire", "- Item"
 _FP_REFERENCE_PHRASE = re.compile(                           # "Opgehaald van ..."
-    r'^(?:opgehaald\s+van|plan\s+van|advies\s+voor|berekening\s+van)',
+    r'^(?:opgehaald\s+van|plan\s+van|advies\s+voor|berekening\s+van|'
+    r'historie\s+van|keuze\s+voor|contactgegevens)',
     re.IGNORECASE
 )
+# Common suffixes that indicate a role/job title, not a person name
+_FP_JOB_TITLE_WORDS = {
+    "medewerker", "medewerkers", "manager", "lasser", "monteur",
+    "begeleider", "verantwoordelijke", "afdelingsverantwoordelijke",
+    "afstudeerbegeleider", "productiemedewerkers", "leidinggevende",
+    "directeur", "coördinator", "adviseur", "specialist", "stagiair",
+    "stagiaire", "student", "docent", "professor", "allround",
+}
 
 
 def _is_plausible_person_name(text: str) -> bool:
-    """Check if text looks like a real person name."""
+    """Check if text looks like a real person name.
+
+    Strict rules:
+    - Single words are almost never person names in Dutch NER output
+      (too many false positives like 'Motivatie', 'Optimaal', 'More').
+    - Must have 2-4 words, with real name-like parts.
+    - Reject job titles / role descriptions.
+    - Reject phrases starting with bullet points.
+    """
     words = text.split()
+
+    # Single words: reject unless it's a very clear name pattern
+    # (single-word person names from spaCy are almost always wrong)
     if len(words) < 2:
-        w = words[0]
-        if len(w) < 3 or not w[0].isupper():
-            return False
-        if w.lower() in _DUTCH_FALSE_POSITIVES:
-            return False
-        # Reject single words that are all-caps (acronyms) or very long compounds
-        if w.isupper() or len(w) > 20:
-            return False
-        return True
+        return False
+
     # A real person name usually has 2-4 words max
     if len(words) > 4:
         return False
+
+    # Reject if any word is a job title / role word
+    for w in words:
+        if w.lower() in _FP_JOB_TITLE_WORDS:
+            return False
+
     # Allow short connector words (van, de, het, den, der)
     connectors = {"van", "de", "het", "den", "der", "ten", "ter"}
     # Count words that look like actual name parts (not false positives)
@@ -271,18 +341,40 @@ def _is_plausible_person_name(text: str) -> bool:
     # At least half of non-connector words should be name-like
     if len(non_connector) == 0:
         return False
-    return len(name_words) >= max(1, len(non_connector) // 2)
+    # Need at least 1 proper name word and most non-connectors should be names
+    if len(name_words) < 1:
+        return False
+    return len(name_words) >= max(1, (len(non_connector) + 1) // 2)
 
 
 def _is_plausible_org(text: str) -> bool:
-    """Check if text looks like a real organization/company name."""
+    """Check if text looks like a real organization/company name.
+
+    Strict rules:
+    - Single common words are not organizations.
+    - Lean/technical methodology terms are not organizations.
+    - Multi-word phrases need strong org indicators (B.V., N.V., Ltd, etc.)
+      or well-known company patterns.
+    """
     words = text.split()
     # Very long phrases are unlikely to be a single org name
     if len(words) > 5:
         return False
-    # Single common word is not an org
-    if len(words) == 1 and words[0].lower() in _DUTCH_FALSE_POSITIVES:
+    # Check if the entire lowered text matches a known false positive phrase
+    text_lower = text.lower().strip()
+    if text_lower in _DUTCH_FALSE_POSITIVES:
         return False
+    # Single word: must not be a common word or technical term
+    if len(words) == 1:
+        w = words[0]
+        if w.lower() in _DUTCH_FALSE_POSITIVES:
+            return False
+        # Reject single generic words (spaCy often tags these as ORG)
+        # Only allow single words that look like real company names
+        # (contain uppercase within word like "iPhone", or known suffixes)
+        if w.isupper() and len(w) <= 8:
+            return False
+        return True
     # Reject if starts with single initial + all remaining words are false positives
     if len(words) >= 2 and _FP_SINGLE_INITIAL.match(words[0]):
         rest = [w for w in words[1:] if len(w) >= 2 and not re.match(r'^\d', w)]
@@ -292,6 +384,14 @@ def _is_plausible_org(text: str) -> bool:
     for w in words:
         if re.match(r'^[A-Z]+\d+[A-Z]*\d*$', w) or re.match(r'^\d+[A-Z]+', w):
             return False
+    # Reject if ALL words (case-insensitive) are in false positives
+    all_words_fp = all(w.lower() in _DUTCH_FALSE_POSITIVES for w in words if len(w) >= 2)
+    if all_words_fp:
+        return False
+    # Reject if it contains job title words (indicates a role, not an org)
+    for w in words:
+        if w.lower() in _FP_JOB_TITLE_WORDS:
+            return False
     # Should have at least one capitalized or distinctive word
     distinctive = [w for w in words if (w[0].isupper() or w.isupper())
                    and w.lower() not in _DUTCH_FALSE_POSITIVES and len(w) >= 2]
@@ -299,21 +399,59 @@ def _is_plausible_org(text: str) -> bool:
 
 
 def _is_plausible_location(text: str) -> bool:
-    """Check if text looks like a real location/place name."""
+    """Check if text looks like a real location/place name.
+
+    Strict rules:
+    - Single words must match a known location OR contain typical street
+      suffixes (straat, laan, weg, plein, etc.).
+    - This prevents author surnames from references being tagged as locations.
+    - Multi-word: at least one word must be a known location or contain
+      a location indicator.
+    """
     words = text.split()
     if len(words) > 4:
         return False
-    if len(words) == 1 and words[0].lower() in _DUTCH_FALSE_POSITIVES:
+
+    text_lower = text.lower().strip()
+    if text_lower in _DUTCH_FALSE_POSITIVES:
         return False
-    # At least one proper-noun-like word
-    proper = [w for w in words if w[0].isupper() and len(w) >= 2
-              and w.lower() not in _DUTCH_FALSE_POSITIVES]
-    return len(proper) >= 1
+
+    # Check if full text or any word matches known locations
+    if text_lower in _KNOWN_DUTCH_LOCATIONS:
+        return True
+
+    # Check for street/address patterns
+    location_suffixes = ("straat", "laan", "weg", "plein", "gracht",
+                         "kade", "singel", "dijk", "steeg", "hof",
+                         "park", "bos", "berg", "meer", "haven")
+    if any(text_lower.endswith(s) for s in location_suffixes):
+        return True
+
+    # For single words: must be a known location
+    # (this prevents author surnames from references being tagged)
+    if len(words) == 1:
+        return words[0].lower() in _KNOWN_DUTCH_LOCATIONS
+
+    # Multi-word: check if any word is a known location
+    for w in words:
+        if w.lower() in _KNOWN_DUTCH_LOCATIONS:
+            return True
+        if any(w.lower().endswith(s) for s in location_suffixes):
+            return True
+
+    # Check for "Sint", "St." patterns (common in Dutch place names)
+    if words[0].lower() in ("sint", "st.", "st", "nieuw", "oud"):
+        return True
+
+    return False
 
 
 def _is_valid_ner_entity(text: str, label: str) -> bool:
     """Master filter: reject obvious false positive NER detections."""
     t = text.strip()
+
+    # Strip leading bullet points / list markers
+    t = _FP_BULLET_PREFIX.sub('', t).strip()
 
     # Too short (less than 2 real characters)
     if len(t) < 2:
@@ -417,6 +555,39 @@ def detect_entities_spacy(text: str, nlp) -> dict:
     return entities
 
 
+def _is_plausible_studentnr(match: str, text: str) -> bool:
+    """Check if a number match is likely a real student number, not an ISBN or random ref."""
+    # Matches with 's'/'S' prefix are very likely student numbers
+    if match[0].lower() == 's':
+        return True
+    # Pure digit matches: only accept if near a contextual keyword
+    ctx_pattern = re.compile(
+        r'(?:student|studentnummer|studnr|leerling|inschrijf).{0,30}'
+        + re.escape(match),
+        re.IGNORECASE
+    )
+    ctx_pattern2 = re.compile(
+        re.escape(match) + r'.{0,10}(?:student)',
+        re.IGNORECASE
+    )
+    return bool(ctx_pattern.search(text) or ctx_pattern2.search(text))
+
+
+def _is_plausible_datum(match: str) -> bool:
+    """Check if a date-pattern match is a real date."""
+    # Split on separators
+    parts = re.split(r'[\-/\.]', match)
+    if len(parts) != 3:
+        return False
+    try:
+        day, month, year = int(parts[0]), int(parts[1]), int(parts[2])
+    except ValueError:
+        return False
+    if year < 100:
+        year += 2000 if year < 50 else 1900
+    return 1 <= day <= 31 and 1 <= month <= 12 and 1900 <= year <= 2100
+
+
 def detect_entities_regex(text: str, selected_categories: list) -> dict:
     """Detect entities using regex patterns."""
     found = {}
@@ -426,8 +597,11 @@ def detect_entities_regex(text: str, selected_categories: list) -> dict:
             # Filter out very short matches that are likely false positives
             if category == "Studentnummer":
                 matches = {m for m in matches if len(m) >= 6}
+                matches = {m for m in matches if _is_plausible_studentnr(m, text)}
             if category == "KvK-nummer":
                 matches = {m for m in matches if len(m) == 8}
+            if category == "Datum":
+                matches = {m for m in matches if _is_plausible_datum(m)}
             if matches:
                 found[category] = matches
     return found
