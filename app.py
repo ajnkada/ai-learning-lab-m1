@@ -179,8 +179,216 @@ def load_spacy_model():
                 return None
 
 
+# --- Common Dutch words that spaCy often misclassifies as entities ---
+# This list filters out false positives from NER detection.
+_DUTCH_FALSE_POSITIVES = {
+    # Document structure / section labels
+    "adres", "advies", "adviesrapport", "analyse", "aanname", "actie",
+    "bijlage", "brainstormen", "berekening", "borgplan", "checklist",
+    "conclusie", "contact", "controle", "control", "cyclus", "data",
+    "datum", "define", "doellijn", "does", "e-mailadres", "figuur",
+    "groep", "handelingen", "hiervoor", "hoofd", "huidig",
+    "implementatie", "improve", "inhoudsopgave", "inleiding",
+    "interne", "intern", "inwendig", "keuzematrix", "kilogram",
+    "klantvraag", "korte", "kwaliteitsverlies", "lijn", "levering",
+    "locatie", "machineverlies", "machinestilstand", "management",
+    "materiaal", "maximale", "measure", "meetplan", "methode",
+    "mobiliseren", "naam", "nauwkeuriger", "november", "omstellen",
+    "omstelmoment", "onderzoeksmodel", "onderzoeksmethode",
+    "opgehaald", "optimaliseren", "opstart", "output", "pauze",
+    "plan", "postcode", "productcode", "productgroep", "project",
+    "planningsgroep", "prestatiegraad", "productiemanager",
+    "productiemedewerkers", "reflecteren", "rekengegevens",
+    "representatief", "resultaat", "samenvatting", "single",
+    "standaard", "stilstand", "stilstandsverlies", "stap",
+    "stakeholders", "telefoonnummer", "tonnage", "transport",
+    "uitvoering", "uitvoeringsgegevens", "validiteit", "voorzichtig",
+    "voorman", "vraag", "wachttijd", "waarderen", "welke",
+    "werkelijke", "zakken", "zakwissel",
+    # Generic adjectives/adverbs/nouns often misclassified
+    "actuele", "act", "afkeur", "afzakmachine", "andon",
+    "bedrijfskunde", "bewust", "blokkade", "cement", "check", "cold",
+    "counting", "cuglaton", "daarentegen", "documenteren", "echter",
+    "education", "effectiveness", "effectiever", "equipment",
+    "etiketteerapparaat", "extern", "gemiddeld", "gemiddelde",
+    "gepland", "extreme", "hoogst", "haalbare", "limited", "machine",
+    "mankementen", "mapping", "montagemortels", "observations",
+    "obseveren", "operations", "overal", "process", "professional",
+    "kwantitatief", "staalvezelmortels", "uren",
+    # Month names
+    "januari", "februari", "maart", "april", "mei", "juni", "juli",
+    "augustus", "september", "oktober", "november", "december",
+    # Common technical/business abbreviations (not company names)
+    "oee", "dmaic", "smed", "pdca", "imwr", "ict", "tms", "osm",
+    "kvk", "bsn", "iban", "tht", "bvnd",
+    # Document field labels / compound technical terms
+    "capaciteitsoverschot", "capaciteitsbenutting",
+    "arbeidscapaciteit",
+}
+
+# Patterns that indicate a false positive NER entity
+_FP_SINGLE_INITIAL = re.compile(r'^[A-Z]\.$')              # "A.", "B.", etc.
+_FP_MULTI_INITIAL = re.compile(r'^([A-Z]\.){2,}$')         # "P.M.J.", "A.B."
+_FP_SECTION_REF = re.compile(r'^\d+[\.\-]')                # "6.3.2 ...", "8-apr"
+_FP_PERCENTAGE = re.compile(r'^\d+[,.]?\d*\s*%$')          # "56%", "73%"
+_FP_NUMBER_HEAVY = re.compile(r'^\d')                       # starts with digit
+_FP_MATH_UNICODE = re.compile(r'[\U0001D400-\U0001D7FF]')  # math italic/bold chars
+_FP_FRAGMENT = re.compile(r'^.{0,3}[\-/=]$|^[\-/=]')       # "in-", "THT-", "𝑢𝑢𝑟="
+_FP_ALL_CAPS_SHORT = re.compile(r'^[A-Z]{2,6}$')            # "ICT", "DMAIC", acronyms
+_FP_ALPHANUMERIC_CODE = re.compile(r'^[A-Z0-9]{2,}$')      # "MP2BOI", "R3", "CAPACITEITSBENUTTING"
+_FP_UNIT = re.compile(r'[/²³]|mm\d|m\d|cm\d')              # units: "N/mm2"
+_FP_ROMAN_NUMERAL = re.compile(r'\b[IVXLCDM]{1,4}\b')      # "VII", "III"
+_FP_REFERENCE_PHRASE = re.compile(                           # "Opgehaald van ..."
+    r'^(?:opgehaald\s+van|plan\s+van|advies\s+voor|berekening\s+van)',
+    re.IGNORECASE
+)
+
+
+def _is_plausible_person_name(text: str) -> bool:
+    """Check if text looks like a real person name."""
+    words = text.split()
+    if len(words) < 2:
+        w = words[0]
+        if len(w) < 3 or not w[0].isupper():
+            return False
+        if w.lower() in _DUTCH_FALSE_POSITIVES:
+            return False
+        # Reject single words that are all-caps (acronyms) or very long compounds
+        if w.isupper() or len(w) > 20:
+            return False
+        return True
+    # A real person name usually has 2-4 words max
+    if len(words) > 4:
+        return False
+    # Allow short connector words (van, de, het, den, der)
+    connectors = {"van", "de", "het", "den", "der", "ten", "ter"}
+    # Count words that look like actual name parts (not false positives)
+    name_words = [w for w in words if w[0].isupper() and len(w) >= 2
+                  and w.lower() not in _DUTCH_FALSE_POSITIVES
+                  and w.lower() not in connectors
+                  and not w.isupper()]
+    non_connector = [w for w in words if w.lower() not in connectors]
+    # At least half of non-connector words should be name-like
+    if len(non_connector) == 0:
+        return False
+    return len(name_words) >= max(1, len(non_connector) // 2)
+
+
+def _is_plausible_org(text: str) -> bool:
+    """Check if text looks like a real organization/company name."""
+    words = text.split()
+    # Very long phrases are unlikely to be a single org name
+    if len(words) > 5:
+        return False
+    # Single common word is not an org
+    if len(words) == 1 and words[0].lower() in _DUTCH_FALSE_POSITIVES:
+        return False
+    # Reject if starts with single initial + all remaining words are false positives
+    if len(words) >= 2 and _FP_SINGLE_INITIAL.match(words[0]):
+        rest = [w for w in words[1:] if len(w) >= 2 and not re.match(r'^\d', w)]
+        if not rest or all(w.lower() in _DUTCH_FALSE_POSITIVES for w in rest):
+            return False
+    # Reject if any word is an alphanumeric code (mix of letters+digits)
+    for w in words:
+        if re.match(r'^[A-Z]+\d+[A-Z]*\d*$', w) or re.match(r'^\d+[A-Z]+', w):
+            return False
+    # Should have at least one capitalized or distinctive word
+    distinctive = [w for w in words if (w[0].isupper() or w.isupper())
+                   and w.lower() not in _DUTCH_FALSE_POSITIVES and len(w) >= 2]
+    return len(distinctive) >= 1
+
+
+def _is_plausible_location(text: str) -> bool:
+    """Check if text looks like a real location/place name."""
+    words = text.split()
+    if len(words) > 4:
+        return False
+    if len(words) == 1 and words[0].lower() in _DUTCH_FALSE_POSITIVES:
+        return False
+    # At least one proper-noun-like word
+    proper = [w for w in words if w[0].isupper() and len(w) >= 2
+              and w.lower() not in _DUTCH_FALSE_POSITIVES]
+    return len(proper) >= 1
+
+
+def _is_valid_ner_entity(text: str, label: str) -> bool:
+    """Master filter: reject obvious false positive NER detections."""
+    t = text.strip()
+
+    # Too short (less than 2 real characters)
+    if len(t) < 2:
+        return False
+
+    # Single initial like "A.", "J."
+    if _FP_SINGLE_INITIAL.match(t):
+        return False
+
+    # Multi-initial like "P.M.J."
+    if _FP_MULTI_INITIAL.match(t):
+        return False
+
+    # Starts with digit (section ref, numbered item)
+    if _FP_NUMBER_HEAVY.match(t):
+        return False
+
+    # Percentage
+    if _FP_PERCENTAGE.match(t):
+        return False
+
+    # Contains mathematical unicode characters (formulas)
+    if _FP_MATH_UNICODE.search(t):
+        return False
+
+    # Fragment ending/starting with punctuation: "in-", "THT-", "/manholes"
+    if _FP_FRAGMENT.match(t):
+        return False
+
+    # Short all-caps acronym without context (likely abbreviation, not entity)
+    if _FP_ALL_CAPS_SHORT.match(t):
+        return False
+
+    # Alphanumeric codes like "MP2BOI", "R3"
+    if _FP_ALPHANUMERIC_CODE.match(t):
+        return False
+
+    # Contains units like "N/mm2"
+    if _FP_UNIT.search(t):
+        return False
+
+    # Reference phrases like "Opgehaald van ...", "Plan van Aanpak"
+    if _FP_REFERENCE_PHRASE.match(t):
+        return False
+
+    # Entire text is a common false positive
+    if t.lower() in _DUTCH_FALSE_POSITIVES:
+        return False
+
+    # Multi-word: check if ALL significant words are common/false positive
+    words = t.split()
+    if len(words) > 1:
+        significant = [w for w in words if len(w) >= 3]
+        if significant and all(w.lower() in _DUTCH_FALSE_POSITIVES for w in significant):
+            return False
+        # Reject if text ends with a roman numeral (e.g. "Inhoudsopgave VII")
+        if _FP_ROMAN_NUMERAL.fullmatch(words[-1]):
+            # Check if remaining words are all false positives
+            rest = [w for w in words[:-1] if len(w) >= 3]
+            if rest and all(w.lower() in _DUTCH_FALSE_POSITIVES for w in rest):
+                return False
+
+    # Category-specific validation
+    if label in ("PER", "PERSON"):
+        return _is_plausible_person_name(t)
+    elif label == "ORG":
+        return _is_plausible_org(t)
+    elif label in ("LOC", "GPE", "FAC"):
+        return _is_plausible_location(t)
+
+    return True
+
+
 def detect_entities_spacy(text: str, nlp) -> dict:
-    """Detect named entities using spaCy NER."""
+    """Detect named entities using spaCy NER with strict false-positive filtering."""
     entities = {
         "Persoonsnaam": set(),
         "Bedrijfsnaam": set(),
@@ -197,9 +405,9 @@ def detect_entities_spacy(text: str, nlp) -> dict:
         doc = nlp(chunk)
         for ent in doc.ents:
             cleaned = ent.text.strip()
-            if len(cleaned) < 2:
+            if not _is_valid_ner_entity(cleaned, ent.label_):
                 continue
-            if ent.label_ == "PER" or ent.label_ == "PERSON":
+            if ent.label_ in ("PER", "PERSON"):
                 entities["Persoonsnaam"].add(cleaned)
             elif ent.label_ == "ORG":
                 entities["Bedrijfsnaam"].add(cleaned)
