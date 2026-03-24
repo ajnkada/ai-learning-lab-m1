@@ -1,24 +1,20 @@
 """
-AI Learning Lab — Module 1: Organisatie & Omgeving
-Kwaliteitscyclus Web App — Visueel Redesign
+Document Anonymizer — Gevoelige informatie anonimiseren
+Upload een PDF of Word-document en anonimiseer automatisch:
+namen, adressen, telefoonnummers, e-mails, BSN/belastingnummers,
+studentnummers, bedrijfsnamen, IBAN-nummers en meer.
 """
 
 import streamlit as st
-import json
-import csv
-from datetime import datetime
-# Cloud version - no local file paths
+import re
+import io
+import tempfile
+import os
 
-# --- Config (Cloud) ---
-# Data stored in session_state (no local filesystem)
-if "zelfinschattingen" not in st.session_state:
-    st.session_state["zelfinschattingen"] = []
-if "docentbeoordelingen" not in st.session_state:
-    st.session_state["docentbeoordelingen"] = []
-
+# --- Page Config ---
 st.set_page_config(
-    page_title="AI Learning Lab — Module 1",
-    page_icon="🎓",
+    page_title="Document Anonymizer",
+    page_icon="🔒",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -28,1080 +24,642 @@ st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap');
 
-    /* Global */
-    .block-container { padding-top: 1.5rem; }
+    .block-container { padding-top: 1.5rem; max-width: 1000px; }
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 
-    /* Headers */
     .main-header {
         font-size: 2.2rem; font-weight: 900; color: #c00000;
         margin-bottom: 0.2rem; letter-spacing: -0.5px;
     }
     .sub-header {
-        font-size: 1.15rem; color: #666; margin-bottom: 1.5rem;
+        font-size: 1.1rem; color: #666; margin-bottom: 1.5rem;
         border-bottom: 3px solid #c00000; padding-bottom: 0.8rem;
     }
-
-    /* Step cards on Start page */
-    .step-card {
-        background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
-        border: 2px solid #e0e0e0; border-radius: 16px;
-        padding: 1.5rem; margin: 0.5rem 0; text-align: center;
-        transition: all 0.3s ease; min-height: 260px;
+    .stat-card {
+        background: linear-gradient(135deg, #fff 0%, #f8f9fa 100%);
+        border: 2px solid #e0e0e0; border-radius: 12px;
+        padding: 1rem; text-align: center; margin: 0.3rem 0;
     }
-    .step-card:hover { border-color: #c00000; transform: translateY(-2px); box-shadow: 0 8px 25px rgba(192,0,0,0.1); }
-    .step-icon { font-size: 3rem; margin-bottom: 0.5rem; }
-    .step-number {
-        display: inline-block; background: #c00000; color: white;
-        width: 32px; height: 32px; border-radius: 50%; line-height: 32px;
-        font-weight: 900; font-size: 0.9rem; margin-bottom: 0.5rem;
+    .stat-number { font-size: 1.8rem; font-weight: 900; color: #c00000; }
+    .stat-label { font-size: 0.85rem; color: #888; }
+    .highlight-box {
+        background: #fff3cd; border-left: 4px solid #ffc107;
+        padding: 0.8rem 1rem; border-radius: 0 8px 8px 0;
+        margin: 0.5rem 0; font-size: 0.9rem;
     }
-    .step-title { font-size: 1.2rem; font-weight: 700; color: #1a1a1a; margin: 0.5rem 0; }
-    .step-desc { font-size: 0.9rem; color: #666; line-height: 1.5; }
-    .step-output {
-        background: #e8f5e9; border-radius: 8px; padding: 0.5rem 0.8rem;
-        margin-top: 0.8rem; font-size: 0.82rem; color: #2e7d32;
+    .success-box {
+        background: #d4edda; border-left: 4px solid #28a745;
+        padding: 0.8rem 1rem; border-radius: 0 8px 8px 0;
+        margin: 0.5rem 0;
     }
-
-    /* Tool cards */
-    .tool-card {
-        background: white; border: 2px solid #e0e0e0; border-radius: 14px;
-        padding: 1.3rem; margin: 0.5rem 0; transition: all 0.2s;
+    .anon-tag {
+        background: #c00000; color: white; padding: 2px 8px;
+        border-radius: 4px; font-weight: 600; font-size: 0.85rem;
     }
-    .tool-card:hover { border-color: #c00000; box-shadow: 0 4px 15px rgba(0,0,0,0.08); }
-    .tool-card-blue { border-left: 5px solid #1565c0; }
-    .tool-card-green { border-left: 5px solid #2e7d32; }
-    .tool-card-orange { border-left: 5px solid #e65100; }
-    .tool-card-purple { border-left: 5px solid #6a1b9a; }
-    .tool-card-red { border-left: 5px solid #c00000; }
-    .tool-title { font-size: 1.05rem; font-weight: 700; color: #1a1a1a; margin-bottom: 0.3rem; }
-    .tool-subtitle { font-size: 0.85rem; color: #888; margin-bottom: 0.6rem; }
-
-    /* Info boxes */
-    .info-box {
-        background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
-        border-radius: 12px; padding: 1rem 1.2rem; margin: 0.8rem 0;
+    .category-header {
+        font-weight: 700; color: #37474f; margin-top: 0.8rem;
+        margin-bottom: 0.3rem; font-size: 0.95rem;
     }
-    .info-box-green {
-        background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
-        border-radius: 12px; padding: 1rem 1.2rem; margin: 0.8rem 0;
+    div[data-testid="stExpander"] {
+        border: 1px solid #e0e0e0; border-radius: 8px;
     }
-    .info-box-orange {
-        background: linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%);
-        border-radius: 12px; padding: 1rem 1.2rem; margin: 0.8rem 0;
-    }
-    .info-box-red {
-        background: linear-gradient(135deg, #ffebee 0%, #ffcdd2 100%);
-        border-radius: 12px; padding: 1rem 1.2rem; margin: 0.8rem 0;
-    }
-
-    /* Badges */
-    .ko-badge {
-        background: #c00000; color: white; padding: 3px 10px;
-        border-radius: 12px; font-size: 0.78rem; font-weight: 700;
-    }
-    .nko-badge {
-        background: #1565c0; color: white; padding: 3px 10px;
-        border-radius: 12px; font-size: 0.78rem; font-weight: 700;
-    }
-
-    /* Level cards */
-    .level-card { padding: 0.9rem 1rem; border-radius: 10px; margin: 0.4rem 0; }
-    .level-1 { background: #ffebee; border-left: 5px solid #c62828; }
-    .level-3 { background: #fff3e0; border-left: 5px solid #e65100; }
-    .level-55 { background: #fff8e1; border-left: 5px solid #f9a825; }
-    .level-8 { background: #e8f5e9; border-left: 5px solid #2e7d32; }
-    .level-10 { background: #e3f2fd; border-left: 5px solid #1565c0; }
-
-    /* Cycle arrow */
-    .cycle-step {
-        background: white; border: 2px solid #e0e0e0; border-radius: 12px;
-        padding: 0.8rem 1rem; margin: 0.3rem 0; display: flex; align-items: center; gap: 0.8rem;
-    }
-    .cycle-step:hover { border-color: #c00000; }
-    .cycle-num {
-        background: #c00000; color: white; width: 28px; height: 28px;
-        border-radius: 50%; display: flex; align-items: center; justify-content: center;
-        font-weight: 700; font-size: 0.8rem; flex-shrink: 0;
-    }
-    .cycle-active { border-color: #c00000; background: #fff5f5; }
-
-    /* Buttons */
-    .stButton > button {
-        background-color: #c00000; color: white; border: none;
-        border-radius: 10px; font-weight: 600; padding: 0.5rem 1.5rem;
-    }
-    .stButton > button:hover { background-color: #8b0000; color: white; }
-
-    /* Sidebar - werkt in light EN dark mode */
-    section[data-testid="stSidebar"] { background: white !important; }
-    section[data-testid="stSidebar"] h2 { color: #c00000 !important; }
-    section[data-testid="stSidebar"] p { color: #333 !important; }
-    section[data-testid="stSidebar"] strong { color: #c00000 !important; }
-    section[data-testid="stSidebar"] hr { border-color: #ddd !important; }
-    /* Radio buttons groot en duidelijk */
-    section[data-testid="stSidebar"] .stRadio label { color: #222 !important; font-size: 1.05rem !important; font-weight: 700 !important; }
-    section[data-testid="stSidebar"] .stRadio label:hover { color: #c00000 !important; }
-    section[data-testid="stSidebar"] .stRadio label p { color: #222 !important; font-size: 1.05rem !important; font-weight: 700 !important; }
-    section[data-testid="stSidebar"] .stRadio label span { color: #222 !important; }
-    section[data-testid="stSidebar"] .stRadio div[data-testid="stMarkdownContainer"] p { color: #222 !important; font-weight: 700 !important; }
-    /* Forceer witte achtergrond op hele pagina ook in dark mode */
-    .stApp, .stApp > div { background-color: #ffffff !important; color: #333 !important; }
-    .stApp header { background-color: #ffffff !important; }
-    .stMarkdown, .stMarkdown p, .stMarkdown li, .stMarkdown span { color: #333 !important; }
-    .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 { color: #1a1a1a !important; }
-
-    /* Expectation box */
-    .expect-box {
-        background: #f0faf0; border: 1px solid #a5d6a7; border-radius: 10px;
-        padding: 0.8rem 1rem; margin: 0.5rem 0;
-    }
-    .expect-label {
-        font-weight: 700; color: #2e7d32; font-size: 0.82rem;
-        text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.3rem;
-    }
-
-    /* Warning box */
-    .warn-box {
-        background: #fff8e1; border: 1px solid #ffe082; border-radius: 10px;
-        padding: 0.8rem 1rem; margin: 0.5rem 0;
-    }
-
-    /* KO fout card */
-    .ko-fout-card {
-        background: white; border: 1px solid #ffcdd2; border-left: 5px solid #c62828;
-        border-radius: 10px; padding: 1rem; margin: 0.6rem 0;
-    }
-    .ko-fout-title { font-weight: 700; color: #c62828; margin-bottom: 0.3rem; }
-    .ko-fout-fix { color: #2e7d32; font-size: 0.9rem; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- Sidebar Navigation ---
-st.sidebar.markdown("## 🎓 AI Learning Lab")
-st.sidebar.markdown("**Module 1: Organisatie & Omgeving**")
-st.sidebar.markdown("---")
-
-page = st.sidebar.radio(
-    "📍 Navigatie",
-    [
-        "🏠 Start",
-        "📊 Zelfinschatting",
-        "🤖 AI Feedbackcoach",
-        "🎙️ CGI Oefencoach",
-        "🎧 Video & Podcast",
-        "📋 Rubrics Naslagwerk",
-        "👨‍🏫 Docent Dashboard",
-    ],
-    index=0,
-)
-
-st.sidebar.markdown("---")
-st.sidebar.markdown("""
-<div style="background: #ffebee; border: 1px solid #c00000; border-radius: 10px; padding: 0.8rem; margin-top: 0.5rem;">
-    <p style="color: #333; font-size: 0.82rem; margin: 0;">
-        ⚠️ <strong style="color: #c00000;">Belangrijk:</strong> De AI geeft geen cijfers. De docent blijft verantwoordelijk voor de beoordeling.
-    </p>
-</div>
-""", unsafe_allow_html=True)
-
-# --- Rubric Data ---
-RUBRIC = {
-    "criterium_1": {
-        "naam": "Analyse & onderbouwing",
-        "weging": "40%",
-        "ko": True,
-        "icon": "🔍",
-        "kleur": "#c00000",
-        "niveaus": {
-            1: "Geen analyse of slechts 1 element. Geen verbanden. Geen bronnen.",
-            3: "3-4 elementen beschreven zonder onderlinge verbanden. Bronnen beperkt of ontbrekend.",
-            5.5: "Alle elementen geanalyseerd met onderlinge verbanden. Min. 3 relevante bronnen. Misalignment concreet benoemd.",
-            8: "Grondige analyse met kwantitatieve onderbouwing. Modellen onderling gekoppeld. Stakeholderanalyse geintegreerd.",
-            10: "Systemische analyse: causaliteit aangetoond. Duurzaamheidsperspectief (SDG/Kapitalen) geintegreerd. Academisch niveau.",
-        },
-    },
-    "criterium_2": {
-        "naam": "Advies & onderbouwing",
-        "weging": "35%",
-        "ko": True,
-        "icon": "💡",
-        "kleur": "#e65100",
-        "niveaus": {
-            1: "Geen advies of niet verbonden aan analyse. Vrijblijvend.",
-            3: "Voorstel aanwezig maar vaag. Geen SMART KPI. Geen SDG-koppeling.",
-            5.5: "Concreet en stellig advies verbonden aan analyse. Min. 1 SMART KPI. SDG-koppeling met specifiek target.",
-            8: "Meerdere alternatieven gewogen. Implementatieperspectief met tijdlijn. Leading/lagging KPIs.",
-            10: "Businesscase met kosten-baten. Trade-offs Zes Kapitalen expliciet. Schaalbaarheidsperspectief.",
-        },
-    },
-    "criterium_3": {
-        "naam": "Professioneel handelen, reflectie & AI",
-        "weging": "25%",
-        "ko": False,
-        "icon": "🧠",
-        "kleur": "#1565c0",
-        "niveaus": {
-            1: "Geen AI-logboek. Geen reflectie. Bronnen ontbreken.",
-            3: "AI-logboek onvolledig. Reflectie oppervlakkig. Beperkte bronvermelding.",
-            5.5: "AI-logboek per sessie met reflectie. Eigen verwerking zichtbaar. APA correct. Professionele rapportage.",
-            8: "Kritische reflectie op AI: correcties gedocumenteerd. Bewuste inzet per fase. Bronnen divers en relevant.",
-            10: "Strategische AI-inzet met meta-reflectie. Toont hoe AI denken versterkte zonder te vervangen. Academisch schrijfniveau.",
-        },
-    },
+# --- Regex Patterns for Dutch / International sensitive data ---
+PATTERNS = {
+    "E-mailadres": r'\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b',
+    "Telefoonnummer": (
+        r'(?:\+31[\s\-]?|0031[\s\-]?|0)'
+        r'(?:[1-9]\d{1,2}[\s\-]?\d{6,7}|\d[\s\-]?\d{3}[\s\-]?\d{4}|'
+        r'\d{2}[\s\-]?\d{3}[\s\-]?\d{3,4}|\d{3}[\s\-]?\d{2}[\s\-]?\d{2}[\s\-]?\d{2})'
+    ),
+    "BSN (Burgerservicenummer)": r'\b\d{9}\b',
+    "IBAN": r'\b[A-Z]{2}\d{2}[\s]?[A-Z]{4}[\s]?\d{4}[\s]?\d{4}[\s]?\d{2,4}[\s]?\d{0,2}\b',
+    "Postcode (NL)": r'\b\d{4}\s?[A-Z]{2}\b',
+    "KvK-nummer": r'\b\d{8}\b',
+    "Studentnummer": r'\b[sS]?\d{6,8}\b',
+    "Datum": r'\b\d{1,2}[\-/\.]\d{1,2}[\-/\.]\d{2,4}\b',
 }
 
-FEEDBACK_PROMPT = """Je bent een formatieve feedbackcoach voor Module 1 "Organisatie & Omgeving" van de opleiding AD Bedrijfskunde aan Avans Hogeschool. Je geeft GEEN cijfer. Je bent een spiegel, geen beoordelaar.
-
-## Jouw rol
-- Je analyseert studentwerk op basis van de drie rubriccriteria hieronder
-- Je geeft per criterium aan op welk niveau het werk zich bevindt (1/3/5,5/8/10)
-- Je formuleert feedback als vragen en suggesties, niet als oordelen
-- Je wijst op concrete verbeterpunten met voorbeelden uit het werk van de student
-- Je bent eerlijk maar constructief
-
-## De drie rubriccriteria
-
-### Criterium 1 — Analyse & onderbouwing (40%, KO-criterium)
-| Niveau | Beschrijving |
-|--------|-------------|
-| 1 | Geen analyse of slechts 1 element. Geen verbanden. Geen bronnen. |
-| 3 | 3-4 elementen beschreven zonder onderlinge verbanden. Bronnen beperkt of ontbrekend. |
-| 5,5 | Alle elementen geanalyseerd met onderlinge verbanden. Min. 3 relevante bronnen. Misalignment concreet benoemd. |
-| 8 | Grondige analyse met kwantitatieve onderbouwing. Modellen onderling gekoppeld. Stakeholderanalyse geintegreerd. |
-| 10 | Systemische analyse: causaliteit aangetoond. Duurzaamheidsperspectief geintegreerd. Academisch niveau. |
-
-### Criterium 2 — Advies & onderbouwing (35%, KO-criterium)
-| Niveau | Beschrijving |
-|--------|-------------|
-| 1 | Geen advies of niet verbonden aan analyse. Vrijblijvend. |
-| 3 | Voorstel aanwezig maar vaag. Geen SMART KPI. Geen SDG-koppeling. |
-| 5,5 | Concreet advies verbonden aan analyse. Min. 1 SMART KPI. SDG-koppeling met specifiek target. |
-| 8 | Meerdere alternatieven gewogen. Implementatieperspectief met tijdlijn. Leading/lagging KPIs. |
-| 10 | Businesscase met kosten-baten. Trade-offs Zes Kapitalen expliciet. Schaalbaarheidsperspectief. |
-
-### Criterium 3 — Professioneel handelen, reflectie & AI (25%, niet-KO)
-| Niveau | Beschrijving |
-|--------|-------------|
-| 1 | Geen AI-logboek. Geen reflectie. Bronnen ontbreken. |
-| 3 | AI-logboek onvolledig. Reflectie oppervlakkig. Beperkte bronvermelding. |
-| 5,5 | AI-logboek per sessie met reflectie. Eigen verwerking zichtbaar. APA correct. |
-| 8 | Kritische reflectie op AI: correcties gedocumenteerd. Bewuste inzet per fase. Bronnen divers. |
-| 10 | Strategische AI-inzet met meta-reflectie. Toont hoe AI denken versterkte. Academisch schrijfniveau. |
-
-## Veelgemaakte KO-fouten (waarschuw expliciet)
-- SBMC-bouwstenen leeg of vaag
-- 7S zonder misalignment-analyse
-- BCG zonder databron voor marktgroei
-- AI-logboek ontbreekt of is minimaal
-- DESTEP niet gekoppeld aan de specifieke organisatie
-- SWOT zonder confrontatiematrix
-- Advies zonder onderbouwing of SDG-koppeling
-
-## Instructies
-Geef feedback in dit format per criterium:
-**Huidig niveau:** [niveau]
-**Wat gaat goed:** [concreet]
-**Wat ontbreekt of kan beter:** [concreet]
-**Vraag om over na te denken:** [reflectievraag]
-
-Sluit af met:
-**KO-check:** [eventuele risico's]
-**Sterkste punt:** [...]
-**Belangrijkste verbeterpunt:** [...]
-**Concrete eerste stap:** [wat nu aanpakken]
-
-Geef NOOIT een cijfer. Zeg altijd: "Dit is formatieve feedback, geen beoordeling."
-"""
+# Placeholder labels for each category
+PLACEHOLDER_MAP = {
+    "E-mailadres": "[E-MAIL]",
+    "Telefoonnummer": "[TELEFOON]",
+    "BSN (Burgerservicenummer)": "[BSN]",
+    "IBAN": "[IBAN]",
+    "Postcode (NL)": "[POSTCODE]",
+    "KvK-nummer": "[KVK]",
+    "Studentnummer": "[STUDENTNR]",
+    "Datum": "[DATUM]",
+    "Persoonsnaam": "[NAAM]",
+    "Bedrijfsnaam": "[BEDRIJF]",
+    "Adres": "[ADRES]",
+    "Locatie": "[LOCATIE]",
+}
 
 
-# ============================
-# PAGE: Start
-# ============================
-def page_start():
-    st.markdown('<p class="main-header">🎓 AI Learning Lab</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Module 1: Organisatie & Omgeving — Kwaliteitscyclus</p>', unsafe_allow_html=True)
-
-    st.markdown("""
-    <div class="info-box">
-        <strong>👋 Welkom!</strong> Deze app helpt je om de kwaliteit van je rapport te herkennen en te verbeteren.
-        Je gebruikt AI-tools als <strong>spiegel</strong> — niet als beoordelaar. Jij blijft in de lead, de docent geeft het cijfer.
-    </div>
-    """, unsafe_allow_html=True)
-
-    st.markdown("")
-
-    # --- 3 Step Cards (using pure Streamlit for clickability) ---
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        with st.container(border=True):
-            st.markdown("#### :red[1] :bar_chart: Zelfinschatting")
-            st.markdown("Schat per criterium in op welk niveau je eigen werk zit. Bekijk de niveaubeschrijvingen en kies eerlijk.")
-            st.caption("**Wat je levert:** Score per criterium + motivatie")
-            if st.button("Start Zelfinschatting", key="btn_zi", use_container_width=True, type="primary"):
-                st.session_state["nav"] = "📊 Zelfinschatting"
-                st.rerun()
-
-    with col2:
-        with st.container(border=True):
-            st.markdown("#### :red[2] :robot_face: AI Feedbackcoach")
-            st.markdown("Plak je tekst en ontvang feedback per criterium. De AI vertelt wat goed gaat en wat beter kan.")
-            st.caption("**Wat je terugkrijgt:** Niveau-inschatting + verbeterpunten")
-            if st.button("Start Feedbackcoach", key="btn_fb", use_container_width=True, type="primary"):
-                st.session_state["nav"] = "🤖 AI Feedbackcoach"
-                st.rerun()
-
-    with col3:
-        with st.container(border=True):
-            st.markdown("#### :red[3] :studio_microphone: CGI Oefencoach")
-            st.markdown("Oefen je mondeling met een AI-beoordelaar die doorvraagt. Met voice of avatar.")
-            st.caption("**Wat je terugkrijgt:** Gesproken feedback + tips")
-            if st.button("Start CGI Coach", key="btn_cgi", use_container_width=True, type="primary"):
-                st.session_state["nav"] = "🎙️ CGI Oefencoach"
-                st.rerun()
-
-    st.markdown("")
-    st.markdown("---")
-
-    # --- Kwaliteitscyclus ---
-    st.markdown("### 🔄 De Kwaliteitscyclus — zo gebruik je deze app")
-
-    steps = [
-        ("📝", "Lever je tussenproduct in", "Je onderdeel (7S, DESTEP, SWOT, advies) is klaar als concept"),
-        ("📊", "Doe de zelfinschatting", "Schat per criterium in: op welk niveau zit ik? Waarom?"),
-        ("🤖", "Vraag AI-feedback", "Plak je tekst in de Feedbackcoach en lees de analyse"),
-        ("🔀", "Vergelijk", "Waar verschilt je eigen inschatting van de AI-feedback?"),
-        ("✍️", "Schrijf reflectie", "Wat heb je geleerd? Wat ga je aanpassen?"),
-        ("🔧", "Pas je werk aan", "Verbeter je rapport op basis van de feedback"),
-        ("👨‍🏫", "Docent beoordeelt", "De docent geeft het definitieve cijfer (summatief)"),
-    ]
-
-    for i, (icon, title, desc) in enumerate(steps):
-        active = " cycle-active" if i in [1, 2, 3] else ""
-        st.markdown(f"""
-        <div class="cycle-step{active}">
-            <div class="cycle-num">{i+1}</div>
-            <div><strong>{icon} {title}</strong><br><span style="color:#888; font-size:0.85rem;">{desc}</span></div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    st.markdown("""
-    <div class="info-box-green" style="margin-top: 1rem;">
-        <strong>💡 Tip:</strong> Stap 2, 3 en 4 (gemarkeerd) kun je meerdere keren herhalen. Hoe vaker je de cyclus doorloopt, hoe beter je kwaliteitsbewustzijn wordt.
-    </div>
-    """, unsafe_allow_html=True)
+def extract_text_from_pdf(file_bytes: bytes) -> str:
+    """Extract text from a PDF file."""
+    try:
+        from pypdf import PdfReader
+        reader = PdfReader(io.BytesIO(file_bytes))
+        text = ""
+        for page in reader.pages:
+            page_text = page.extract_text()
+            if page_text:
+                text += page_text + "\n"
+        return text
+    except Exception as e:
+        st.error(f"Fout bij het lezen van PDF: {e}")
+        return ""
 
 
-# ============================
-# PAGE: Zelfinschatting
-# ============================
-def page_zelfinschatting():
-    st.markdown('<p class="main-header">📊 Zelfinschatting</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Schat in op welk niveau je eigen werk zich bevindt</p>', unsafe_allow_html=True)
+def extract_text_from_docx(file_bytes: bytes) -> str:
+    """Extract text from a Word document."""
+    try:
+        from docx import Document
+        doc = Document(io.BytesIO(file_bytes))
+        paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+        return "\n".join(paragraphs)
+    except Exception as e:
+        st.error(f"Fout bij het lezen van Word-document: {e}")
+        return ""
 
-    st.markdown("""
-    <div class="info-box">
-        <strong>🎯 Doel:</strong> Leer herkennen hoe goed je eigen werk is. Dit telt <strong>niet</strong> mee voor je cijfer.<br>
-        <strong>📥 Wat je invoert:</strong> Je naam, het onderdeel dat je inlevert, en je inschatting per criterium.<br>
-        <strong>📤 Wat er gebeurt:</strong> Je inschatting wordt opgeslagen. Na de AI-feedback kun je terugkomen voor reflectie.
-    </div>
-    """, unsafe_allow_html=True)
 
-    st.markdown("")
-
-    # Student info
-    col1, col2 = st.columns(2)
-    with col1:
-        naam = st.text_input("👤 Naam en studentnummer", placeholder="bijv. Jan Jansen — 2345678")
-    with col2:
-        onderdeel = st.selectbox("📄 Welk onderdeel lever je in?", [
-            "7S-analyse (interne analyse)",
-            "DESTEP + Porter (externe analyse)",
-            "SWOT + confrontatiematrix",
-            "Strategisch advies",
-            "Volledig rapport",
-        ])
-
-    week = st.selectbox("📅 Meetmoment", ["Week 4 (Formatief 1)", "Week 6 (Formatief 2)", "Week 8 (Voor inleveren)"])
-
-    st.markdown("---")
-    st.markdown("### Jouw inschatting per criterium")
-
-    scores = {}
-    motivaties = {}
-
-    for key, crit in RUBRIC.items():
-        badge = f'<span class="ko-badge">⚠️ KO-criterium</span>' if crit["ko"] else '<span class="nko-badge">Niet-KO</span>'
-        st.markdown(f"### {crit['icon']} {crit['naam']} ({crit['weging']}) {badge}", unsafe_allow_html=True)
-
-        if crit["ko"]:
-            st.markdown("""
-            <div class="warn-box">
-                <strong>⚠️ Let op:</strong> Dit is een KO-criterium. Bij een onvoldoende (<5,5) is je maximale eindcijfer een 4,5.
-            </div>
-            """, unsafe_allow_html=True)
-
-        with st.expander("👁️ Bekijk de niveaubeschrijvingen — klik om te openen"):
-            for niveau, beschrijving in crit["niveaus"].items():
-                level_class = {1: "level-1", 3: "level-3", 5.5: "level-55", 8: "level-8", 10: "level-10"}
-                emoji = {1: "🔴", 3: "🟠", 5.5: "🟡", 8: "🟢", 10: "🔵"}
-                st.markdown(
-                    f'<div class="level-card {level_class[niveau]}">{emoji[niveau]} <strong>Niveau {niveau}:</strong> {beschrijving}</div>',
-                    unsafe_allow_html=True,
+def load_spacy_model():
+    """Load spaCy NLP model for NER."""
+    import spacy
+    try:
+        return spacy.load("nl_core_news_lg")
+    except OSError:
+        try:
+            return spacy.load("nl_core_news_md")
+        except OSError:
+            try:
+                return spacy.load("nl_core_news_sm")
+            except OSError:
+                st.warning(
+                    "Geen Nederlands spaCy-model gevonden. "
+                    "Installeer met: `python -m spacy download nl_core_news_sm`\n\n"
+                    "NER-detectie (namen, bedrijven, locaties) is uitgeschakeld. "
+                    "Regex-patronen werken nog steeds."
                 )
+                return None
 
-        score_options = [1, 3, 5.5, 8, 10]
-        score_labels = ["🔴 1 — Onvoldoende", "🟠 3 — Matig", "🟡 5,5 — Voldoende", "🟢 8 — Goed", "🔵 10 — Uitstekend"]
-        selected = st.select_slider(
-            f"Jouw inschatting voor {crit['naam']}",
-            options=score_options,
-            format_func=lambda x: score_labels[score_options.index(x)],
-            value=5.5,
-            key=f"score_{key}",
+
+def detect_entities_spacy(text: str, nlp) -> dict:
+    """Detect named entities using spaCy NER."""
+    entities = {
+        "Persoonsnaam": set(),
+        "Bedrijfsnaam": set(),
+        "Locatie": set(),
+    }
+    if nlp is None:
+        return entities
+
+    # Process in chunks to handle large documents
+    max_len = 100000
+    chunks = [text[i:i + max_len] for i in range(0, len(text), max_len)]
+
+    for chunk in chunks:
+        doc = nlp(chunk)
+        for ent in doc.ents:
+            cleaned = ent.text.strip()
+            if len(cleaned) < 2:
+                continue
+            if ent.label_ == "PER" or ent.label_ == "PERSON":
+                entities["Persoonsnaam"].add(cleaned)
+            elif ent.label_ == "ORG":
+                entities["Bedrijfsnaam"].add(cleaned)
+            elif ent.label_ in ("LOC", "GPE", "FAC"):
+                entities["Locatie"].add(cleaned)
+
+    return entities
+
+
+def detect_entities_regex(text: str, selected_categories: list) -> dict:
+    """Detect entities using regex patterns."""
+    found = {}
+    for category in selected_categories:
+        if category in PATTERNS:
+            matches = set(re.findall(PATTERNS[category], text))
+            # Filter out very short matches that are likely false positives
+            if category == "Studentnummer":
+                matches = {m for m in matches if len(m) >= 6}
+            if category == "KvK-nummer":
+                matches = {m for m in matches if len(m) == 8}
+            if matches:
+                found[category] = matches
+    return found
+
+
+def anonymize_text(text: str, entities_to_replace: dict) -> tuple:
+    """Replace all detected entities with placeholders. Returns (anonymized_text, count)."""
+    anonymized = text
+    total_replacements = 0
+
+    # Sort entities by length (longest first) to avoid partial replacements
+    all_replacements = []
+    for category, values in entities_to_replace.items():
+        placeholder = PLACEHOLDER_MAP.get(category, f"[{category.upper()}]")
+        for value in values:
+            all_replacements.append((value, placeholder, category))
+
+    all_replacements.sort(key=lambda x: len(x[0]), reverse=True)
+
+    for value, placeholder, category in all_replacements:
+        escaped = re.escape(value)
+        pattern = re.compile(escaped, re.IGNORECASE)
+        count = len(pattern.findall(anonymized))
+        if count > 0:
+            anonymized = pattern.sub(placeholder, anonymized)
+            total_replacements += count
+
+    return anonymized, total_replacements
+
+
+def create_pdf(text: str) -> bytes:
+    """Create a PDF from anonymized text."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+    from reportlab.lib.units import mm
+    from reportlab.lib.enums import TA_LEFT
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=20 * mm,
+        leftMargin=20 * mm,
+        topMargin=20 * mm,
+        bottomMargin=20 * mm,
+    )
+
+    styles = getSampleStyleSheet()
+    normal_style = ParagraphStyle(
+        'CustomNormal',
+        parent=styles['Normal'],
+        fontSize=10,
+        leading=14,
+        alignment=TA_LEFT,
+        spaceAfter=6,
+    )
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Title'],
+        fontSize=14,
+        leading=18,
+        spaceAfter=12,
+        textColor='#c00000',
+    )
+
+    story = []
+    story.append(Paragraph("Geanonimiseerd Document", title_style))
+    story.append(Spacer(1, 6 * mm))
+
+    # Process text line by line
+    for line in text.split('\n'):
+        safe_line = (
+            line.replace('&', '&amp;')
+            .replace('<', '&lt;')
+            .replace('>', '&gt;')
         )
-        scores[key] = selected
-
-        motivatie = st.text_area(
-            f"💬 Waarom denk je dat je op dit niveau zit? Geef een concreet voorbeeld uit je rapport.",
-            key=f"mot_{key}",
-            height=100,
-            placeholder="bijv. 'Ik heb 4 bronnen gebruikt en de misalignment tussen Strategie en Structuur benoemd...'"
-        )
-        motivaties[key] = motivatie
-
-        st.markdown("---")
-
-    # Reflectie na AI-feedback
-    st.markdown("### ✍️ Reflectie na AI-feedback")
-    st.markdown("""
-    <div class="info-box-orange">
-        <strong>⏱️ Vul dit later in</strong> — nadat je de AI Feedbackcoach hebt gebruikt. Kom dan terug naar deze pagina.
-    </div>
-    """, unsafe_allow_html=True)
-
-    reflectie_verschil = st.text_area("🔀 Op welke punten verschilde de AI-feedback van je eigen inschatting?", key="refl_verschil", height=100)
-    reflectie_verrassing = st.text_area("😮 Welk feedbackpunt verraste je het meest? Waarom?", key="refl_verrassing", height=100)
-    reflectie_actie = st.text_area("✅ Wat ga je concreet aanpassen? Noem minimaal 2 actiepunten.", key="refl_actie", height=100)
-
-    # Submit
-    st.markdown("")
-    if st.button("💾 Zelfinschatting opslaan", type="primary", use_container_width=True):
-        if not naam:
-            st.error("⚠️ Vul je naam en studentnummer in.")
-            return
-
-        entry = {
-            "timestamp": datetime.now().isoformat(),
-            "naam": naam,
-            "onderdeel": onderdeel,
-            "week": week,
-            "score_c1": scores["criterium_1"],
-            "score_c2": scores["criterium_2"],
-            "score_c3": scores["criterium_3"],
-            "motivatie_c1": motivaties["criterium_1"],
-            "motivatie_c2": motivaties["criterium_2"],
-            "motivatie_c3": motivaties["criterium_3"],
-            "reflectie_verschil": reflectie_verschil,
-            "reflectie_verrassing": reflectie_verrassing,
-            "reflectie_actie": reflectie_actie,
-        }
-
-        st.session_state["zelfinschattingen"].append(entry)
-
-        st.success("✅ Zelfinschatting opgeslagen!")
-        st.markdown("""
-        <div class="info-box-green">
-            <strong>👉 Volgende stap:</strong> Ga naar de <strong>AI Feedbackcoach</strong> om feedback te krijgen op je werk.
-            Kom daarna hier terug om de reflectie in te vullen.
-        </div>
-        """, unsafe_allow_html=True)
-
-
-# ============================
-# PAGE: AI Feedbackcoach
-# ============================
-def page_feedbackcoach():
-    st.markdown('<p class="main-header">🤖 AI Feedbackcoach</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Ontvang feedback op je rapport per criterium</p>', unsafe_allow_html=True)
-
-    st.markdown("""
-    <div class="info-box">
-        <strong>🎯 Doel:</strong> De AI analyseert je tekst op de 3 rubriccriteria en geeft feedback.<br>
-        <strong>📥 Wat je invoert:</strong> Een stuk tekst uit je rapport (7S, DESTEP, SWOT, advies).<br>
-        <strong>📤 Wat je terugkrijgt:</strong> Per criterium: huidig niveau, wat goed gaat, wat beter kan, en een reflectievraag.<br>
-        <strong>⚠️ Belangrijk:</strong> De AI geeft <strong>geen cijfer</strong>. Dit is een spiegel, geen beoordeling.
-    </div>
-    """, unsafe_allow_html=True)
-
-    st.markdown("")
-
-    # Two options
-    tab_api, tab_manual = st.tabs(["Direct in de app (met API key)", "Handmatig via Claude.ai (gratis)"])
-
-    with tab_api:
-        with st.container(border=True):
-            st.markdown("**Directe AI-feedback in de app**")
-            st.markdown("Plak je tekst, klik op de knop, en ontvang direct feedback hieronder.")
-
-        with st.form("feedback_form"):
-            api_key = st.text_input("Anthropic API Key", type="password",
-                                    help="Vraag je docent om de API key, of maak een gratis account op console.anthropic.com")
-
-            onderdeel = st.selectbox("Welk onderdeel wil je laten checken?", [
-                "7S-analyse", "DESTEP", "Porter 5 krachten", "SWOT",
-                "Confrontatiematrix", "Strategisch advies", "Volledig rapport",
-            ])
-
-            student_text = st.text_area(
-                "Plak hier je tekst",
-                height=300,
-                placeholder="Kopieer het onderdeel uit je rapport en plak het hier. Minimaal 50 tekens.",
+        # Highlight anonymized placeholders in red
+        for placeholder in PLACEHOLDER_MAP.values():
+            escaped_ph = placeholder.replace('[', '&lt;').replace(']', '&gt;')
+            safe_line_escaped = placeholder.replace('[', '&lt;').replace(']', '&gt;')
+            safe_line = safe_line.replace(
+                placeholder,
+                f'<font color="#c00000"><b>{safe_line_escaped}</b></font>'
             )
+        if safe_line.strip():
+            story.append(Paragraph(safe_line, normal_style))
+        else:
+            story.append(Spacer(1, 3 * mm))
 
-            submitted = st.form_submit_button("Vraag feedback", type="primary", use_container_width=True)
+    doc.build(story)
+    return buffer.getvalue()
 
-        if submitted:
-            if not api_key:
-                st.error("Vul je API key in.")
-            elif not student_text or len(student_text) < 50:
-                st.error("Plak een tekst van minimaal 50 tekens.")
+
+def create_docx(text: str) -> bytes:
+    """Create a Word document from anonymized text."""
+    from docx import Document
+    from docx.shared import Pt, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    doc = Document()
+
+    # Title
+    title = doc.add_heading("Geanonimiseerd Document", level=1)
+    for run in title.runs:
+        run.font.color.rgb = RGBColor(0xC0, 0x00, 0x00)
+
+    # Process text
+    placeholder_pattern = re.compile(
+        r'(\[(?:' + '|'.join(
+            re.escape(p.strip('[]')) for p in PLACEHOLDER_MAP.values()
+        ) + r')\])'
+    )
+
+    for line in text.split('\n'):
+        if not line.strip():
+            doc.add_paragraph("")
+            continue
+
+        paragraph = doc.add_paragraph()
+        parts = placeholder_pattern.split(line)
+
+        for part in parts:
+            if placeholder_pattern.match(part):
+                run = paragraph.add_run(part)
+                run.bold = True
+                run.font.color.rgb = RGBColor(0xC0, 0x00, 0x00)
+                run.font.size = Pt(10)
             else:
-                try:
-                    import anthropic
-                    client = anthropic.Anthropic(api_key=api_key)
+                run = paragraph.add_run(part)
+                run.font.size = Pt(10)
 
-                    with st.spinner("AI analyseert je werk op basis van de rubriccriteria..."):
-                        message = client.messages.create(
-                            model="claude-sonnet-4-20250514",
-                            max_tokens=4000,
-                            messages=[{
-                                "role": "user",
-                                "content": f"{FEEDBACK_PROMPT}\n\nDe student levert het volgende onderdeel in: {onderdeel}\n\nHier is de tekst van de student:\n\n{student_text}",
-                            }],
-                        )
-
-                    st.markdown("---")
-                    st.markdown("### Feedback van de AI Feedbackcoach")
-                    st.markdown(message.content[0].text)
-                    st.info("Dit is formatieve feedback, geen beoordeling. De docent geeft het definitieve cijfer. Ga nu terug naar de Zelfinschatting om je reflectie in te vullen.")
-
-                except Exception as e:
-                    st.error(f"Er ging iets mis: {e}")
-
-    with tab_manual:
-        st.markdown("""
-        <div class="tool-card tool-card-green">
-            <div class="tool-title">📋 Handmatig via Claude.ai (gratis)</div>
-            <div class="tool-subtitle">Kopieer de feedbackprompt, plak in Claude.ai, en voeg je eigen tekst toe.</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        st.markdown("""
-        <div class="info-box-green">
-            <strong>Hoe het werkt — 4 stappen:</strong>
-            <ol style="margin: 0.5rem 0 0 1.2rem;">
-                <li>Kopieer de prompt hieronder</li>
-                <li>Open <a href="https://claude.ai" target="_blank">claude.ai</a> en start een nieuw gesprek</li>
-                <li>Plak de prompt, gevolgd door je eigen tekst</li>
-                <li>Lees de feedback en ga terug naar <strong>Zelfinschatting</strong> voor je reflectie</li>
-            </ol>
-        </div>
-        """, unsafe_allow_html=True)
-
-        st.markdown("")
-        with st.expander("📋 Klik hier om de volledige feedbackprompt te zien en te kopieren", expanded=False):
-            st.code(FEEDBACK_PROMPT, language=None)
-
-        st.markdown("""
-        <div class="expect-box" style="margin-top: 1rem;">
-            <div class="expect-label">📤 Wat je terugkrijgt in Claude.ai</div>
-            Per criterium: huidig niveau, wat goed gaat, wat beter kan, een reflectievraag.<br>
-            Plus: KO-check, sterkste punt, belangrijkste verbeterpunt, en een concrete eerste stap.
-        </div>
-        """, unsafe_allow_html=True)
+    buffer = io.BytesIO()
+    doc.save(buffer)
+    return buffer.getvalue()
 
 
-# ============================
-# PAGE: CGI Oefencoach
-# ============================
-def page_cgi():
-    st.markdown('<p class="main-header">🎙️ CGI Oefencoach</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Oefen je mondeling met een AI-beoordelaar</p>', unsafe_allow_html=True)
+# ===================== MAIN APP =====================
 
-    st.markdown("""
-    <div class="info-box">
-        <strong>🎯 Doel:</strong> Oefen je CGI-verdediging met een AI die doorvraagt zoals een echte beoordelaar.<br>
-        <strong>📥 Wat je doet:</strong> Kies een tool, open de link, en beantwoord vragen over je rapport.<br>
-        <strong>📤 Wat je terugkrijgt:</strong> Gesproken of geschreven feedback op je antwoorden + tips voor verbetering.
-    </div>
-    """, unsafe_allow_html=True)
+st.markdown('<div class="main-header">🔒 Document Anonymizer</div>', unsafe_allow_html=True)
+st.markdown(
+    '<div class="sub-header">'
+    'Upload een document en anonimiseer automatisch gevoelige informatie'
+    '</div>',
+    unsafe_allow_html=True,
+)
 
-    st.markdown("")
-
-    # Three tool cards
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.markdown("""
-        <div class="tool-card tool-card-green">
-            <div class="tool-title">🗣️ ChatGPT Voice — Gesproken CGI-oefening</div>
-            <div class="tool-subtitle">Gratis met ChatGPT Plus • Echt heen-en-weer gesprek</div>
-            <ul style="font-size: 0.9rem; margin: 0.5rem 0;">
-                <li>Open de link → tik op 🎙️ microfoon</li>
-                <li>De AI stelt vragen, jij antwoordt sprekend</li>
-                <li>Krijg direct gesproken feedback</li>
-                <li>Zeg "ik wil feedback op mijn werk" voor feedbackmodus</li>
-            </ul>
-        </div>
-        """, unsafe_allow_html=True)
-        st.link_button("🟢 Open CGI Coach in ChatGPT", "https://chatgpt.com/g/g-69bab0ada134819198327518226cd7e3-cgi-coach-module-1-organisatie-omgeving", use_container_width=True)
-
-    with col2:
-        st.markdown("""
-        <div class="tool-card tool-card-purple">
-            <div class="tool-title">👤 Graham Avatar — Sprekende beoordelaar</div>
-            <div class="tool-subtitle">HeyGen LiveAvatar • Je ziet een persoon die praat</div>
-            <ul style="font-size: 0.9rem; margin: 0.5rem 0;">
-                <li>Open de link → klik "Chat now"</li>
-                <li>Graham stelt CGI-vragen met beeld en geluid</li>
-                <li>Jij antwoordt via je microfoon</li>
-                <li>Realistischer dan alleen stem</li>
-            </ul>
-        </div>
-        """, unsafe_allow_html=True)
-        st.link_button("🟣 Open CGI Avatar Coach (Graham)", "https://app.liveavatar.com/e9844e6d-847e-4964-a92b-7ecd066f69df", use_container_width=True)
-
-    st.markdown("")
-    st.markdown("""
-    <div class="info-box-green">
-        <strong>💡 Tip:</strong> Oefen minimaal 2 keer: 1x met je rapport erbij, 1x zonder. Oefen staand — net als bij het echte CGI.
-    </div>
-    """, unsafe_allow_html=True)
-
+# --- Sidebar: Settings ---
+with st.sidebar:
+    st.markdown("### ⚙️ Instellingen")
     st.markdown("---")
 
-    # Vragenbank
-    st.markdown("### 📝 Vragenbank — bereid je voor op deze vragen")
+    st.markdown("**Categorieën om te detecteren:**")
 
-    col1, col2 = st.columns(2)
+    regex_categories = list(PATTERNS.keys())
+    ner_categories = ["Persoonsnaam", "Bedrijfsnaam", "Locatie"]
 
-    with col1:
-        st.markdown("""
-        <div class="tool-card tool-card-red">
-            <div class="tool-title">🔍 Analysevragen (Criterium 1 — KO)</div>
-        </div>
-        """, unsafe_allow_html=True)
-        questions_c1 = [
-            "Waarom heb je juist het 7S-model gebruikt voor deze organisatie?",
-            "Welke misalignment in het 7S-model vond je het meest opvallend en waarom?",
-            "Je plaatst product X als Question Mark in de BCG. Hoe weet je dat de markt groeit?",
-            "Wat zou er veranderen in je SBMC als de organisatie morgen failliet gaat?",
-            "Kun je een concreet verband leggen tussen twee S-elementen die niet op elkaar aansluiten?",
-        ]
-        for q in questions_c1:
-            st.markdown(f"- {q}")
+    st.markdown('<div class="category-header">📝 Regex-detectie</div>', unsafe_allow_html=True)
+    selected_regex = {}
+    for cat in regex_categories:
+        selected_regex[cat] = st.checkbox(cat, value=True, key=f"regex_{cat}")
 
-    with col2:
-        st.markdown("""
-        <div class="tool-card tool-card-orange">
-            <div class="tool-title">💡 Adviesvragen (Criterium 2 — KO)</div>
-        </div>
-        """, unsafe_allow_html=True)
-        questions_c2 = [
-            "Waarom is deze kans specifiek voor JULLIE organisatie, en niet voor de hele sector?",
-            "Wat is het grootste risico van jullie advies?",
-            "Hoe weet je dat de confrontatiematrix-keuze de juiste is?",
-            "Hoe hangt je advies samen met een specifiek SDG-target?",
-            "Als de directeur vraagt 'waarom dit en niet iets anders?' — wat zeg je?",
-        ]
-        for q in questions_c2:
-            st.markdown(f"- {q}")
-
-    st.markdown("""
-    <div class="tool-card tool-card-blue">
-        <div class="tool-title">🧠 AI-transparantievragen (altijd)</div>
-    </div>
-    """, unsafe_allow_html=True)
-    questions_ai = [
-        "Hoe heb je AI gebruikt in dit rapport? Waarvoor precies?",
-        "Geef een voorbeeld waarbij AI iets verkeerd had dat jij hebt gecorrigeerd.",
-        "Waar ligt voor jou de grens van AI-gebruik?",
-    ]
-    for q in questions_ai:
-        st.markdown(f"- {q}")
+    st.markdown('<div class="category-header">🤖 NER-detectie (spaCy)</div>', unsafe_allow_html=True)
+    selected_ner = {}
+    for cat in ner_categories:
+        selected_ner[cat] = st.checkbox(cat, value=True, key=f"ner_{cat}")
 
     st.markdown("---")
-
-    # PAIA
-    st.markdown("### 🏗️ PAIA — Zo bouw je een sterk antwoord op")
-
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.markdown("""
-        <div class="tool-card tool-card-red" style="text-align:center;">
-            <div style="font-size: 2rem;">🎯</div>
-            <div class="tool-title">P — Punt</div>
-            <div style="font-size: 0.85rem;">Begin met je kernboodschap</div>
-            <div style="font-size: 0.8rem; color: #888; margin-top: 0.3rem;"><em>"Ons advies is digitalisering omdat..."</em></div>
-        </div>
-        """, unsafe_allow_html=True)
-    with col2:
-        st.markdown("""
-        <div class="tool-card tool-card-orange" style="text-align:center;">
-            <div style="font-size: 2rem;">📊</div>
-            <div class="tool-title">A — Argumenten</div>
-            <div style="font-size: 0.85rem;">2-3 concrete bewijzen</div>
-            <div style="font-size: 0.8rem; color: #888; margin-top: 0.3rem;"><em>"SWOT toont... CBS-data..."</em></div>
-        </div>
-        """, unsafe_allow_html=True)
-    with col3:
-        st.markdown("""
-        <div class="tool-card tool-card-green" style="text-align:center;">
-            <div style="font-size: 2rem;">💡</div>
-            <div class="tool-title">I — Illustratie</div>
-            <div style="font-size: 0.85rem;">Concreet voorbeeld</div>
-            <div style="font-size: 0.8rem; color: #888; margin-top: 0.3rem;"><em>"Buurtzorg: 30% minder admin"</em></div>
-        </div>
-        """, unsafe_allow_html=True)
-    with col4:
-        st.markdown("""
-        <div class="tool-card tool-card-blue" style="text-align:center;">
-            <div style="font-size: 2rem;">🏁</div>
-            <div class="tool-title">A — Afsluiting</div>
-            <div style="font-size: 0.85rem;">Herhaal conclusie</div>
-            <div style="font-size: 0.8rem; color: #888; margin-top: 0.3rem;"><em>"Daarom is ICT de beste koers"</em></div>
-        </div>
-        """, unsafe_allow_html=True)
-
-
-# ============================
-# PAGE: Video & Podcast
-# ============================
-def page_media():
-    st.markdown('<p class="main-header">🎧 Video & Podcast</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Luister, kijk en leer — op je eigen tempo</p>', unsafe_allow_html=True)
-
-    st.markdown("""
-    <div class="info-box">
-        <strong>🎯 Doel:</strong> Begrijp de rubrics, vermijd KO-fouten, en bereid je voor op het CGI.<br>
-        <strong>📥 Wat je doet:</strong> Luister de podcasts en stel vragen via NotebookLM.<br>
-        <strong>📤 Wat je leert:</strong> Hoe de beoordeling werkt, waar studenten falen, en hoe je je mondeling aanpakt.
-    </div>
-    """, unsafe_allow_html=True)
-
-    st.markdown("")
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.markdown("""
-        <div class="tool-card tool-card-red">
-            <div class="tool-title">🎧 Podcast 1: Voorkom een KO bij je bedrijfsrapport</div>
-            <div class="tool-subtitle">~15 minuten • Rubrics, KO-fouten, niveauverschillen</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        st.info("🎧 Luister via NotebookLM — klik op de link onderaan deze pagina.")
-
-        st.markdown("""
-        <div class="expect-box">
-            <div class="expect-label">📤 Wat je leert</div>
-            • Hoe de 3 beoordelingscriteria werken<br>
-            • Wat de KO-regel concreet betekent<br>
-            • Het verschil tussen niveau 3, 5,5 en 8<br>
-            • De 7 meest gemaakte KO-fouten<br>
-            • Hoe je AI slim en verantwoord gebruikt
-        </div>
-        """, unsafe_allow_html=True)
-
-    with col2:
-        st.markdown("""
-        <div class="tool-card tool-card-orange">
-            <div class="tool-title">🎧 Podcast 2: Zo overleef je het beruchte CGI</div>
-            <div class="tool-subtitle">~18 minuten • PAIA-methode, moeilijkste vragen, AI-transparantie</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        st.info("🎧 Luister via NotebookLM — klik op de link onderaan deze pagina.")
-
-        st.markdown("""
-        <div class="expect-box">
-            <div class="expect-label">📤 Wat je leert</div>
-            • Wat het CGI wel en niet toetst<br>
-            • De PAIA-antwoordstructuur<br>
-            • De 3 moeilijkste vragen en hoe je ze beantwoordt<br>
-            • Omgaan met AI-vragen in het CGI<br>
-            • Wat te doen als je vastloopt
-        </div>
-        """, unsafe_allow_html=True)
+    st.markdown("**Exportformaat:**")
+    export_format = st.radio(
+        "Kies formaat",
+        ["PDF", "Word (.docx)", "Beide"],
+        index=2,
+        label_visibility="collapsed",
+    )
 
     st.markdown("---")
+    st.markdown(
+        '<div class="highlight-box">'
+        '💡 <b>Tip:</b> Voor de beste resultaten met namen en '
+        'bedrijven, installeer het Nederlandse spaCy-model:<br>'
+        '<code>python -m spacy download nl_core_news_sm</code>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
 
-    st.markdown("""
-    <div class="tool-card tool-card-blue">
-        <div class="tool-title">🔎 NotebookLM — Stel je eigen vragen over de rubric</div>
-        <div class="tool-subtitle">Open het notebook, stel een vraag, en krijg antwoord op basis van de bronnen.</div>
-    </div>
-    """, unsafe_allow_html=True)
+# --- File Upload ---
+st.markdown("### 📄 Document uploaden")
+uploaded_file = st.file_uploader(
+    "Sleep een bestand hierheen of klik om te uploaden",
+    type=["pdf", "docx"],
+    help="Ondersteunde formaten: PDF (.pdf), Word (.docx)",
+)
 
-    st.link_button("🔵 Open Kwaliteitsspiegel in NotebookLM", "https://notebooklm.google.com/notebook/ba023c5c-1004-4868-97ef-2a3d056570fd", use_container_width=True)
+if uploaded_file is not None:
+    file_bytes = uploaded_file.read()
+    file_name = uploaded_file.name
+    file_ext = file_name.rsplit('.', 1)[-1].lower()
 
+    st.markdown(
+        f'<div class="success-box">✅ <b>{file_name}</b> succesvol geüpload '
+        f'({len(file_bytes) / 1024:.1f} KB)</div>',
+        unsafe_allow_html=True,
+    )
 
-# ============================
-# PAGE: Rubrics Naslagwerk
-# ============================
-def page_rubrics():
-    st.markdown('<p class="main-header">📋 Rubrics Naslagwerk</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">De volledige beoordelingscriteria — altijd bij de hand</p>', unsafe_allow_html=True)
+    # Extract text
+    with st.spinner("📖 Tekst extraheren uit document..."):
+        if file_ext == "pdf":
+            original_text = extract_text_from_pdf(file_bytes)
+        elif file_ext == "docx":
+            original_text = extract_text_from_docx(file_bytes)
+        else:
+            st.error("Niet-ondersteund bestandsformaat.")
+            st.stop()
 
-    st.markdown("""
-    <div class="info-box">
-        <strong>📖 Gebruik deze pagina als referentie</strong> terwijl je werkt aan je rapport.
-        Bekijk per criterium wat je nodig hebt voor elk niveau.
-    </div>
-    """, unsafe_allow_html=True)
+    if not original_text.strip():
+        st.error(
+            "Geen tekst gevonden in het document. "
+            "Het bestand is mogelijk een gescande afbeelding. "
+            "Gebruik een OCR-tool om het eerst naar tekst om te zetten."
+        )
+        st.stop()
 
-    st.markdown("")
+    # Show original text preview
+    with st.expander("👁️ Originele tekst bekijken", expanded=False):
+        st.text_area(
+            "Originele tekst",
+            original_text[:5000] + ("..." if len(original_text) > 5000 else ""),
+            height=200,
+            disabled=True,
+            label_visibility="collapsed",
+        )
 
-    for key, crit in RUBRIC.items():
-        badge = "⚠️ KO-criterium" if crit["ko"] else "Niet-KO"
-        badge_class = "ko-badge" if crit["ko"] else "nko-badge"
+    # Detect entities
+    st.markdown("### 🔍 Detectie & Anonimisering")
 
-        st.markdown(f'### {crit["icon"]} {crit["naam"]} ({crit["weging"]}) <span class="{badge_class}">{badge}</span>', unsafe_allow_html=True)
+    with st.spinner("🔍 Gevoelige informatie detecteren..."):
+        # Regex detection
+        active_regex_cats = [cat for cat, active in selected_regex.items() if active]
+        regex_entities = detect_entities_regex(original_text, active_regex_cats)
 
-        for niveau, beschrijving in crit["niveaus"].items():
-            level_class = {1: "level-1", 3: "level-3", 5.5: "level-55", 8: "level-8", 10: "level-10"}
-            emoji = {1: "🔴", 3: "🟠", 5.5: "🟡", 8: "🟢", 10: "🔵"}
+        # NER detection
+        ner_entities = {}
+        active_ner_cats = [cat for cat, active in selected_ner.items() if active]
+        if active_ner_cats:
+            nlp = load_spacy_model()
+            if nlp is not None:
+                all_ner = detect_entities_spacy(original_text, nlp)
+                ner_entities = {
+                    cat: vals for cat, vals in all_ner.items()
+                    if cat in active_ner_cats and vals
+                }
+
+    # Combine all entities
+    all_entities = {}
+    all_entities.update(regex_entities)
+    all_entities.update(ner_entities)
+
+    # Show detection results
+    total_items = sum(len(v) for v in all_entities.values())
+
+    if total_items == 0:
+        st.warning(
+            "⚠️ Geen gevoelige informatie gedetecteerd. "
+            "Het document bevat mogelijk geen herkenbare patronen, "
+            "of de tekst kon niet goed worden geëxtraheerd."
+        )
+    else:
+        # Stats row
+        cols = st.columns(4)
+        categories_found = len(all_entities)
+        with cols[0]:
             st.markdown(
-                f'<div class="level-card {level_class[niveau]}">{emoji[niveau]} <strong>Niveau {niveau}:</strong> {beschrijving}</div>',
+                f'<div class="stat-card">'
+                f'<div class="stat-number">{total_items}</div>'
+                f'<div class="stat-label">Items gevonden</div></div>',
+                unsafe_allow_html=True,
+            )
+        with cols[1]:
+            st.markdown(
+                f'<div class="stat-card">'
+                f'<div class="stat-number">{categories_found}</div>'
+                f'<div class="stat-label">Categorieën</div></div>',
+                unsafe_allow_html=True,
+            )
+        with cols[2]:
+            words = len(original_text.split())
+            st.markdown(
+                f'<div class="stat-card">'
+                f'<div class="stat-number">{words}</div>'
+                f'<div class="stat-label">Woorden totaal</div></div>',
+                unsafe_allow_html=True,
+            )
+        with cols[3]:
+            st.markdown(
+                f'<div class="stat-card">'
+                f'<div class="stat-number">{len(original_text)}</div>'
+                f'<div class="stat-label">Tekens totaal</div></div>',
                 unsafe_allow_html=True,
             )
 
         st.markdown("")
 
-    st.markdown("---")
+        # Show found entities per category with option to deselect
+        st.markdown("**Gevonden items per categorie:**")
+        entities_to_replace = {}
 
-    st.markdown("### 🚨 KO-fouten — vermijd deze!")
-    st.markdown("""
-    <div class="info-box-red">
-        <strong>Als je een van deze fouten maakt, riskeer je een KO (onvoldoende).</strong>
-        Check je rapport op elk punt voordat je inlevert.
-    </div>
-    """, unsafe_allow_html=True)
+        for category, values in all_entities.items():
+            placeholder = PLACEHOLDER_MAP.get(category, f"[{category.upper()}]")
+            with st.expander(
+                f"{category} — {len(values)} gevonden → wordt vervangen door `{placeholder}`"
+            ):
+                items_list = sorted(values)
+                selected_items = st.multiselect(
+                    f"Selecteer items om te anonimiseren ({category})",
+                    options=items_list,
+                    default=items_list,
+                    key=f"select_{category}",
+                    label_visibility="collapsed",
+                )
+                if selected_items:
+                    entities_to_replace[category] = set(selected_items)
 
-    ko_fouten = [
-        ("SBMC bouwstenen leeg of vaag", "Schrijf concrete cijfers, certificeringen of externe rapporten. Geen marketingclaims.", "🏢"),
-        ("7S zonder misalignment-analyse", "Benoem verbanden EN botsingen tussen elementen. Minimaal 2 misalignments.", "🔗"),
-        ("BCG zonder databron voor marktgroei", "Noem altijd een bron (CBS, brancherapport) voor marktgroei EN marktaandeel.", "📈"),
-        ("AI-logboek ontbreekt of is minimaal", "Gebruik het format: datum / tool / prompt / output / verificatie / aanpassing.", "🤖"),
-        ("DESTEP niet gekoppeld aan organisatie", "Voeg altijd toe: 'Dit beinvloedt [bedrijf] doordat... Dit is een kans/bedreiging omdat...'", "🌍"),
-        ("SWOT zonder confrontatiematrix", "Maak altijd een 2x2 confrontatiematrix. Zonder matrix = KO.", "📊"),
-        ("Advies zonder onderbouwing of SDG-koppeling", "Gebruik: 'Op basis van [combinatie] adviseren wij [maatregel]. Dit draagt bij aan SDG [nummer].'", "🎯"),
-    ]
-
-    for i, (fout, oplossing, icon) in enumerate(ko_fouten, 1):
-        st.markdown(f"""
-        <div class="ko-fout-card">
-            <div class="ko-fout-title">{icon} Fout {i}: {fout}</div>
-            <div class="ko-fout-fix">✅ Oplossing: {oplossing}</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-
-# ============================
-# PAGE: Docent Dashboard
-# ============================
-def page_dashboard():
-    st.markdown('<p class="main-header">👨‍🏫 Docent Dashboard</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Overzicht, beoordeling en inschatfout-analyse</p>', unsafe_allow_html=True)
-
-    password = st.text_input("🔒 Docentwachtwoord", type="password")
-    if password != "avans2026":
-        st.markdown("""
-        <div class="info-box-orange">
-            <strong>🔐 Beveiligd.</strong> Voer het docentwachtwoord in om het dashboard te openen.
-        </div>
-        """, unsafe_allow_html=True)
-        return
-
-    st.markdown("""
-    <div class="info-box-green">
-        <strong>✅ Ingelogd als docent.</strong> Hier zie je alle zelfinschattingen, kun je docentcijfers invoeren, en de inschatfout analyseren.
-    </div>
-    """, unsafe_allow_html=True)
-
-    # Upload option for cloud
-    uploaded = st.file_uploader("📤 Upload eerder geexporteerde zelfinschattingen (CSV)", type="csv")
-    if uploaded:
-        import pandas as pd
-        df_up = pd.read_csv(uploaded)
-        st.session_state["zelfinschattingen"] = df_up.to_dict("records")
-        st.success(f"✅ {len(df_up)} zelfinschattingen geladen.")
-
-    data = st.session_state["zelfinschattingen"]
-    if not data:
-        st.info("📭 Nog geen zelfinschattingen ontvangen.")
-        return
-
-    import pandas as pd
-    df = pd.DataFrame(data)
-
-    # Summary
-    st.markdown(f"### 📊 Overzicht — {len(df)} zelfinschattingen")
-
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("📝 Totaal inzendingen", len(df))
-    with col2:
-        st.metric("🔍 Gem. C1 (Analyse)", f"{df['score_c1'].mean():.1f}")
-    with col3:
-        st.metric("💡 Gem. C2 (Advies)", f"{df['score_c2'].mean():.1f}")
-    with col4:
-        st.metric("🧠 Gem. C3 (Prof.)", f"{df['score_c3'].mean():.1f}")
-
-    st.markdown("---")
-
-    # Per week
-    if "week" in df.columns:
-        st.markdown("### 📅 Per meetmoment")
-        for week in df["week"].unique():
-            week_df = df[df["week"] == week]
-            with st.expander(f"**{week}** — {len(week_df)} inzendingen"):
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("C1 Analyse", f"{week_df['score_c1'].mean():.1f}")
-                with col2:
-                    st.metric("C2 Advies", f"{week_df['score_c2'].mean():.1f}")
-                with col3:
-                    st.metric("C3 Prof.", f"{week_df['score_c3'].mean():.1f}")
-
-    st.markdown("---")
-
-    # Distribution
-    st.markdown("### 📈 Verdeling scores")
-    tab1, tab2, tab3 = st.tabs(["🔍 Criterium 1", "💡 Criterium 2", "🧠 Criterium 3"])
-    with tab1:
-        st.bar_chart(df["score_c1"].value_counts().sort_index())
-    with tab2:
-        st.bar_chart(df["score_c2"].value_counts().sort_index())
-    with tab3:
-        st.bar_chart(df["score_c3"].value_counts().sort_index())
-
-    st.markdown("---")
-
-    # Docentbeoordeling
-    st.markdown("### ✏️ Docentbeoordeling invoeren")
-    st.markdown("""
-    <div class="info-box">
-        <strong>Hoe het werkt:</strong> Selecteer een student, bekijk hun zelfinschatting, en voer jouw beoordeling in.
-        De app berekent automatisch de inschatfout (verschil tussen zelfinschatting en docentcijfer).
-    </div>
-    """, unsafe_allow_html=True)
-
-    studenten = df["naam"].unique()
-    selected_student = st.selectbox("👤 Selecteer student", studenten)
-
-    if selected_student:
-        student_df = df[df["naam"] == selected_student]
-        st.dataframe(student_df[["week", "onderdeel", "score_c1", "score_c2", "score_c3"]], use_container_width=True)
-
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            db_c1 = st.number_input("🔍 Docentcijfer C1", min_value=1.0, max_value=10.0, step=0.5, value=5.5, key="db_c1")
-        with col2:
-            db_c2 = st.number_input("💡 Docentcijfer C2", min_value=1.0, max_value=10.0, step=0.5, value=5.5, key="db_c2")
-        with col3:
-            db_c3 = st.number_input("🧠 Docentcijfer C3", min_value=1.0, max_value=10.0, step=0.5, value=5.5, key="db_c3")
-
-        if st.button("💾 Beoordeling opslaan", use_container_width=True):
-            beoordeling = {
-                "timestamp": datetime.now().isoformat(),
-                "naam": selected_student,
-                "docent_c1": db_c1,
-                "docent_c2": db_c2,
-                "docent_c3": db_c3,
-            }
-            st.session_state["docentbeoordelingen"].append(beoordeling)
-            st.success(f"✅ Beoordeling voor {selected_student} opgeslagen.")
-
-    st.markdown("---")
-
-    # Inschatfout analyse
-    beo = st.session_state["docentbeoordelingen"]
-    if beo:
-        st.markdown("### 🎯 Inschatfout-analyse")
-        st.markdown("""
-        <div class="info-box-orange">
-            <strong>Wat is de inschatfout?</strong> Het absolute verschil tussen de zelfinschatting van de student en het docentcijfer.
-            Een lagere inschatfout = beter kwaliteitsbewustzijn.
-        </div>
-        """, unsafe_allow_html=True)
-
-        beo_df = pd.DataFrame(beo)
-        latest_zi = df.sort_values("timestamp").groupby("naam").last().reset_index()
-        merged = latest_zi.merge(beo_df.groupby("naam").last().reset_index(), on="naam", suffixes=("_zi", "_db"))
-
-        if len(merged) > 0:
-            merged["fout_c1"] = abs(merged["score_c1"] - merged["docent_c1"])
-            merged["fout_c2"] = abs(merged["score_c2"] - merged["docent_c2"])
-            merged["fout_c3"] = abs(merged["score_c3"] - merged["docent_c3"])
-
-            st.dataframe(
-                merged[["naam", "score_c1", "docent_c1", "fout_c1", "score_c2", "docent_c2", "fout_c2", "score_c3", "docent_c3", "fout_c3"]],
-                use_container_width=True,
-            )
-
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("🎯 Gem. inschatfout C1", f"{merged['fout_c1'].mean():.1f}")
-            with col2:
-                st.metric("🎯 Gem. inschatfout C2", f"{merged['fout_c2'].mean():.1f}")
-            with col3:
-                st.metric("🎯 Gem. inschatfout C3", f"{merged['fout_c3'].mean():.1f}")
-
-    # Export
-    st.markdown("---")
-    st.markdown("### 📥 Data exporteren")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.download_button(
-            "📥 Download zelfinschattingen (CSV)",
-            data=df.to_csv(index=False).encode("utf-8"),
-            file_name="zelfinschattingen_export.csv",
-            mime="text/csv",
-            use_container_width=True,
+        # Allow user to add custom terms
+        st.markdown("---")
+        custom_terms = st.text_area(
+            "✏️ Extra termen om te anonimiseren (één per regel)",
+            help="Voeg handmatig termen toe die niet automatisch zijn gedetecteerd.",
+            height=80,
         )
-    with col2:
-        if st.session_state["docentbeoordelingen"]:
-            beo_df = pd.DataFrame(st.session_state["docentbeoordelingen"])
-            st.download_button(
-                "📥 Download docentbeoordelingen (CSV)",
-                data=beo_df.to_csv(index=False).encode("utf-8"),
-                file_name="docentbeoordelingen_export.csv",
-                mime="text/csv",
-                use_container_width=True,
-            )
+        if custom_terms.strip():
+            custom_list = {
+                t.strip() for t in custom_terms.split('\n') if t.strip()
+            }
+            if custom_list:
+                entities_to_replace["Handmatig"] = custom_list
+                if "Handmatig" not in PLACEHOLDER_MAP:
+                    PLACEHOLDER_MAP["Handmatig"] = "[VERBORGEN]"
 
+        # Anonymize button
+        st.markdown("")
+        if st.button("🔒 Document Anonimiseren", type="primary", use_container_width=True):
+            if not entities_to_replace:
+                st.warning("Geen items geselecteerd om te anonimiseren.")
+            else:
+                with st.spinner("🔒 Bezig met anonimiseren..."):
+                    anonymized_text, replacement_count = anonymize_text(
+                        original_text, entities_to_replace
+                    )
 
-# ============================
-# ROUTER
-# ============================
-if "nav" in st.session_state:
-    page = st.session_state["nav"]
-    del st.session_state["nav"]
+                st.markdown(
+                    f'<div class="success-box">'
+                    f'✅ <b>{replacement_count}</b> vervangingen gemaakt in het document.'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
 
-if page == "🏠 Start":
-    page_start()
-elif page == "📊 Zelfinschatting":
-    page_zelfinschatting()
-elif page == "🤖 AI Feedbackcoach":
-    page_feedbackcoach()
-elif page == "🎙️ CGI Oefencoach":
-    page_cgi()
-elif page == "🎧 Video & Podcast":
-    page_media()
-elif page == "📋 Rubrics Naslagwerk":
-    page_rubrics()
-elif page == "👨‍🏫 Docent Dashboard":
-    page_dashboard()
+                # Store in session state
+                st.session_state["anonymized_text"] = anonymized_text
+                st.session_state["replacement_count"] = replacement_count
+
+        # Show results if available
+        if "anonymized_text" in st.session_state:
+            anonymized_text = st.session_state["anonymized_text"]
+
+            st.markdown("### 📋 Geanonimiseerd resultaat")
+
+            with st.expander("👁️ Geanonimiseerde tekst bekijken", expanded=True):
+                st.text_area(
+                    "Geanonimiseerde tekst",
+                    anonymized_text[:5000] + (
+                        "..." if len(anonymized_text) > 5000 else ""
+                    ),
+                    height=300,
+                    disabled=True,
+                    label_visibility="collapsed",
+                )
+
+            # Download buttons
+            st.markdown("### 💾 Downloaden")
+            dl_cols = st.columns(2)
+
+            if export_format in ["PDF", "Beide"]:
+                with dl_cols[0]:
+                    with st.spinner("PDF genereren..."):
+                        pdf_bytes = create_pdf(anonymized_text)
+                    base_name = file_name.rsplit('.', 1)[0]
+                    st.download_button(
+                        label="📥 Download als PDF",
+                        data=pdf_bytes,
+                        file_name=f"{base_name}_geanonimiseerd.pdf",
+                        mime="application/pdf",
+                        use_container_width=True,
+                    )
+
+            if export_format in ["Word (.docx)", "Beide"]:
+                with dl_cols[1]:
+                    with st.spinner("Word-document genereren..."):
+                        docx_bytes = create_docx(anonymized_text)
+                    base_name = file_name.rsplit('.', 1)[0]
+                    st.download_button(
+                        label="📥 Download als Word",
+                        data=docx_bytes,
+                        file_name=f"{base_name}_geanonimiseerd.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        use_container_width=True,
+                    )
+
+else:
+    # Landing state
+    st.markdown("")
+    cols = st.columns([1, 2, 1])
+    with cols[1]:
+        st.markdown(
+            """
+            <div style="text-align: center; padding: 3rem 1rem;
+                        background: #f8f9fa; border-radius: 16px;
+                        border: 2px dashed #ccc;">
+                <div style="font-size: 3rem; margin-bottom: 1rem;">📄🔒</div>
+                <div style="font-size: 1.2rem; font-weight: 700; color: #37474f;
+                            margin-bottom: 0.5rem;">
+                    Upload een document om te beginnen
+                </div>
+                <div style="color: #888; font-size: 0.9rem;">
+                    Ondersteunde formaten: PDF, Word (.docx)
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("")
+    st.markdown("### 🛡️ Wat wordt er gedetecteerd?")
+
+    detect_cols = st.columns(3)
+    with detect_cols[0]:
+        st.markdown(
+            """
+            **Persoonsgegevens**
+            - Persoonsnamen
+            - E-mailadressen
+            - Telefoonnummers
+            - BSN-nummers
+            - Geboortedata
+            """
+        )
+    with detect_cols[1]:
+        st.markdown(
+            """
+            **Organisatie & Onderwijs**
+            - Bedrijfsnamen
+            - KvK-nummers
+            - Studentnummers
+            - IBAN-nummers
+            """
+        )
+    with detect_cols[2]:
+        st.markdown(
+            """
+            **Locatiegegevens**
+            - Adressen
+            - Postcodes
+            - Steden & locaties
+            """
+        )
+
+    st.markdown("---")
+    st.markdown(
+        '<div class="highlight-box">'
+        '🔒 <b>Privacy:</b> Alle verwerking gebeurt lokaal op uw computer. '
+        'Er worden geen gegevens naar externe servers gestuurd.'
+        '</div>',
+        unsafe_allow_html=True,
+    )
